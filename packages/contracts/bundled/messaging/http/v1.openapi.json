@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Messaging API",
-    "version": "1.25.0",
-    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds. Member roles, invitations (POST .../invitation/accept|decline, GET /v1/messaging/invitations). 1.14.0: existing DIRECT creation accepts counterpartCfMeetId, and membership addition accepts cfMeetId, as exclusive alternatives to principal UUIDs. Personal scope only; server-authenticated actor, purpose-bound resolution and authoritative policy checks; no new endpoints. 1.16.0: x-cfmeet-required-scope (the API Gateway scope pre-check) on the 92 credential operations whose handler requires exactly one registry scope (including the Section 13 session-device issue / revoke: messages.read / messages.send); GET /v1/conversations, GET /v1/conversations/{id} and GET/DELETE …/members keep a per-request choice (messages.read with an acting principal, else conversations.manage) and stay upstream-checked (Section 15, PLT-011). 1.17.0: GET /v1/messaging/push/configuration (push platforms of the deployment and the Web Push application-server key; messages.read). 1.20.0 (CF Meet Platform Build, ADR 0062 / 0063): the userToken security scheme (Authorization: Bearer cfut_..., a CF Meet user token verified by Platform Access); POST /v1/messaging/user-sessions exchanges it for a MANAGED-only partner session device and client token (EXTERNAL environments, msg grant; MESSAGING_PARTNER_SESSION_DEVICES_ENABLED); PUT / DELETE /v1/messaging/user-push-registrations/{installationId} (partner push registrations synchronised to the Notification Service; MESSAGING_PARTNER_PUSH_ENABLED). A partner session device's client token reaches only a closed MANAGED-only allowlist of the clientToken member operations (conversations and members read; messages list / get / send / edit / delete; reactions; read cursor; unread; events; attachments create / finalize / get / download grants; conversation search; reports): every other operation answers 401 CLIENT_TOKENS_NOT_ENABLED / PARTNER_ROUTE_NOT_ALLOWED and a PRIVATE_E2EE conversation answers 404. Realtime tickets and WebSocket upgrades of partner session devices also accept the environment's allowed websites (Platform Access) as Origin. 1.21.0 (CF Meet Apps, ADR 0064; MESSAGING_APPS_ENABLED): the oauthAccessToken security scheme (Authorization: Bearer cfoa_… OAuth access token or cfob_… bot token of a CF Meet App, verified by Platform Access) on the operations an app may use: conversations and members (read), messages (list, get, send, edit, delete), reactions, read cursor, unread, events, attachments (create, finalize, get, download grants), conversation search, search across the principal's MANAGED conversations, reports and invitation accept / decline. An OAuth credential acts only as the one principal it is restricted to (the granting user or the app's organization bot; CF-Acting-Principal may only repeat it, else 403 PRINCIPAL_NOT_AUTHORIZED / ACTING_PRINCIPAL_MISMATCH), sees MANAGED conversations only (PRIVATE_E2EE answers 404 and is absent from lists and search counts), and every other operation answers 403 INSUFFICIENT_SCOPE / OAUTH_ROUTE_NOT_ALLOWED (with the flag off every operation answers 403 INSUFFICIENT_SCOPE / OAUTH_NOT_ENABLED). Messages an app sent carry viaApplicationId. A CF Meet App's bot (BOT_OR_SERVICE, reference app:<appId>) is a member of MANAGED conversations only (403 PRINCIPAL_NOT_AUTHORIZED / APP_BOT_MANAGED_ONLY). 1.22.0: MLS self-join: submitMlsCommit accepts groupInfo (the GroupInfo of the new epoch) and external commits of the acting principal's own ACTIVE device; getMlsGroupState returns the current epoch's groupInfo; the device directory shows keyPackagesAvailable for the acting principal's own devices; claimKeyPackages can be limited to deviceIds. 1.23.0 (chat controls): PUT /v1/conversations/{conversationId}/inbox-settings (F1: the member's own archive / pin, at most three pins; returned in the inbox summary); PRIVATE_E2EE sends accept mentionedPrincipalIds (B3, ids only); PATCH retentionSeconds may lengthen or turn off disappearing messages (null) within the policy, by a chat admin (B4). 1.24.0 (chat organization and polls): favourite on PUT /v1/conversations/{conversationId}/inbox-settings and in the inbox summary (WhatsApp Favourites); the member's own chat lists GET / POST /v1/messaging/chat-lists, PATCH / DELETE /v1/messaging/chat-lists/{listId}, PUT / DELETE /v1/messaging/chat-lists/{listId}/conversations/{conversationId} (at most 20 lists of 500 conversations; never visible to anyone else; removing an item never touches the conversation); MANAGED polls (send with poll; PUT .../messages/{messageId}/poll/vote, POST .../messages/{messageId}/poll/close; events messaging.poll.voted / closed carry the current tally); a MANAGED group's description (create / PATCH description) and group photo (avatarRef attachment:<attachmentId>); a group admin may change title, avatarRef and description. 1.25.0 (ADR 0069): Status (24-hour statuses with server-enforced audience snapshots of mutual contacts, close friends and named lists, mutes, rings, viewers, reactions, replies, forwards and reshares) and Channels under /v1/messaging/status and /v1/messaging/channels, with resumable part uploads to protected object storage. Status content is stored server-side (not end-to-end encrypted)."
+    "version": "1.28.0",
+    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds. Member roles, invitations (POST .../invitation/accept|decline, GET /v1/messaging/invitations). 1.14.0: existing DIRECT creation accepts counterpartCfMeetId, and membership addition accepts cfMeetId, as exclusive alternatives to principal UUIDs. Personal scope only; server-authenticated actor, purpose-bound resolution and authoritative policy checks; no new endpoints. 1.16.0: x-cfmeet-required-scope (the API Gateway scope pre-check) on the 92 credential operations whose handler requires exactly one registry scope (including the Section 13 session-device issue / revoke: messages.read / messages.send); GET /v1/conversations, GET /v1/conversations/{id} and GET/DELETE …/members keep a per-request choice (messages.read with an acting principal, else conversations.manage) and stay upstream-checked (Section 15, PLT-011). 1.17.0: GET /v1/messaging/push/configuration (push platforms of the deployment and the Web Push application-server key; messages.read). 1.20.0 (CF Meet Platform Build, ADR 0062 / 0063): the userToken security scheme (Authorization: Bearer cfut_..., a CF Meet user token verified by Platform Access); POST /v1/messaging/user-sessions exchanges it for a MANAGED-only partner session device and client token (EXTERNAL environments, msg grant; MESSAGING_PARTNER_SESSION_DEVICES_ENABLED); PUT / DELETE /v1/messaging/user-push-registrations/{installationId} (partner push registrations synchronised to the Notification Service; MESSAGING_PARTNER_PUSH_ENABLED). A partner session device's client token reaches only a closed MANAGED-only allowlist of the clientToken member operations (conversations and members read; messages list / get / send / edit / delete; reactions; read cursor; unread; events; attachments create / finalize / get / download grants; conversation search; reports): every other operation answers 401 CLIENT_TOKENS_NOT_ENABLED / PARTNER_ROUTE_NOT_ALLOWED and a PRIVATE_E2EE conversation answers 404. Realtime tickets and WebSocket upgrades of partner session devices also accept the environment's allowed websites (Platform Access) as Origin. 1.21.0 (CF Meet Apps, ADR 0064; MESSAGING_APPS_ENABLED): the oauthAccessToken security scheme (Authorization: Bearer cfoa_… OAuth access token or cfob_… bot token of a CF Meet App, verified by Platform Access) on the operations an app may use: conversations and members (read), messages (list, get, send, edit, delete), reactions, read cursor, unread, events, attachments (create, finalize, get, download grants), conversation search, search across the principal's MANAGED conversations, reports and invitation accept / decline. An OAuth credential acts only as the one principal it is restricted to (the granting user or the app's organization bot; CF-Acting-Principal may only repeat it, else 403 PRINCIPAL_NOT_AUTHORIZED / ACTING_PRINCIPAL_MISMATCH), sees MANAGED conversations only (PRIVATE_E2EE answers 404 and is absent from lists and search counts), and every other operation answers 403 INSUFFICIENT_SCOPE / OAUTH_ROUTE_NOT_ALLOWED (with the flag off every operation answers 403 INSUFFICIENT_SCOPE / OAUTH_NOT_ENABLED). Messages an app sent carry viaApplicationId. A CF Meet App's bot (BOT_OR_SERVICE, reference app:<appId>) is a member of MANAGED conversations only (403 PRINCIPAL_NOT_AUTHORIZED / APP_BOT_MANAGED_ONLY). 1.22.0: MLS self-join: submitMlsCommit accepts groupInfo (the GroupInfo of the new epoch) and external commits of the acting principal's own ACTIVE device; getMlsGroupState returns the current epoch's groupInfo; the device directory shows keyPackagesAvailable for the acting principal's own devices; claimKeyPackages can be limited to deviceIds. 1.23.0 (chat controls): PUT /v1/conversations/{conversationId}/inbox-settings (F1: the member's own archive / pin, at most three pins; returned in the inbox summary); PRIVATE_E2EE sends accept mentionedPrincipalIds (B3, ids only); PATCH retentionSeconds may lengthen or turn off disappearing messages (null) within the policy, by a chat admin (B4). 1.24.0 (chat organization and polls): favourite on PUT /v1/conversations/{conversationId}/inbox-settings and in the inbox summary (WhatsApp Favourites); the member's own chat lists GET / POST /v1/messaging/chat-lists, PATCH / DELETE /v1/messaging/chat-lists/{listId}, PUT / DELETE /v1/messaging/chat-lists/{listId}/conversations/{conversationId} (at most 20 lists of 500 conversations; never visible to anyone else; removing an item never touches the conversation); MANAGED polls (send with poll; PUT .../messages/{messageId}/poll/vote, POST .../messages/{messageId}/poll/close; events messaging.poll.voted / closed carry the current tally); a MANAGED group's description (create / PATCH description) and group photo (avatarRef attachment:<attachmentId>); a group admin may change title, avatarRef and description. 1.25.0 (ADR 0069): Status (24-hour statuses with server-enforced audience snapshots of mutual contacts, close friends and named lists, mutes, rings, viewers, reactions, replies, forwards and reshares) and Channels under /v1/messaging/status and /v1/messaging/channels, with resumable part uploads to protected object storage. Status content is stored server-side (not end-to-end encrypted). 1.28.0 (ADR 0073): Communities under /v1/messaging/communities (groups under one structure with an Announcements group, linked or created groups with OPEN / RESTRICTED access, invitations, revocable invite links, join requests, bans, roles OWNER / ADMIN / MEMBER and group admins, chat-list preference); every community resource answers 404 to non-members; joining a group opens a new history window (nothing earlier is visible)."
   },
   "tags": [
     {
@@ -17,6 +17,10 @@
     {
       "name": "Client Sessions",
       "description": "Client Sessions operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Communities",
+      "description": "Communities operations in the Messaging API. Review each operation's description for its behavior, access requirements and schemas."
     },
     {
       "name": "Compliance & Data Exports",
@@ -12720,6 +12724,3032 @@
           }
         }
       }
+    },
+    "/v1/messaging/communities": {
+      "get": {
+        "operationId": "listCommunities",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "List my communities",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. ADR 0073 (Communities). The caller's communities, most recently joined first (keyset pages).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createCommunity",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Create a community",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). Creates a community the caller owns, with its Announcements group (a MANAGED group in which only the community owner and admins post). Never requires Organizations membership. At most 10 per hour and 50 owned.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Optional: a retried creation with the same key (within 24 hours) returns the original (200) instead of creating another.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.CommunityCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "An earlier creation with the same Idempotency-Key (replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.Community"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.Community"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/preferences": {
+      "get": {
+        "operationId": "getCommunityPreferences",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Get my community chat-list preference",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. ADR 0073 (Communities). TOGETHER (community groups also in All) or SEPARATE (only under the Communities filter).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityPreferences"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "putCommunityPreferences",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Set my community chat-list preference",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). Stored per principal, so every device of the account shows the same.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.CommunityPreferences"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityPreferences"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/invitations": {
+      "get": {
+        "operationId": "listMyCommunityInvitations",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "List my community invitations",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. ADR 0073 (Communities). Open invitations addressed to the caller, each with a preview of its community.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityInvitationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/invitations/{invitationId}/accept": {
+      "post": {
+        "operationId": "acceptCommunityInvitation",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Accept a community invitation",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). An admin's invitation (or any invitation of an OPEN / INVITE_ONLY community) joins at once; a member's invitation to an APPROVAL community creates a join request (202).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "invitationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Already a member, or joined.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityJoinResult"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "A join request was created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityJoinResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/invitations/{invitationId}/decline": {
+      "post": {
+        "operationId": "declineCommunityInvitation",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Decline a community invitation",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). The invitee only.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "invitationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityInvitation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/invite-links/preview": {
+      "post": {
+        "operationId": "previewCommunityInviteLink",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Preview a community invite link",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. ADR 0073 (Communities). What the holder of a link may see before joining. An unknown, expired, used-up or revoked link answers 404 INVITE_LINK_UNAVAILABLE alike.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.CommunityTokenRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityPreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/invite-links/join": {
+      "post": {
+        "operationId": "joinCommunityInviteLink",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Join a community with an invite link",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). Joins (201), asks to join in an APPROVAL community (202) or answers 200 for an existing member. Banned people are refused.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.CommunityTokenRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Already a member, or joined.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityJoinResult"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityJoinResult"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "A join request was created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityJoinResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/join-requests": {
+      "get": {
+        "operationId": "listMyCommunityJoinRequests",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "List my join requests",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. ADR 0073 (Communities). Newest first.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityJoinRequestPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/join-requests/{requestId}/cancel": {
+      "post": {
+        "operationId": "cancelCommunityJoinRequest",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Cancel my join request",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). The requester only.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityJoinRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/{communityId}": {
+      "get": {
+        "operationId": "getCommunity",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Get a community",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. ADR 0073 (Communities). Members only (404 otherwise).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.Community"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateCommunity",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Update a community",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). A community admin: name, description, rules, privacy and whether members may add groups.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.CommunityUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.Community"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteCommunity",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Delete a community",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). The owner. Groups are unlinked and keep working on their own; the Announcements group is deleted.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityDeleted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/{communityId}/owner": {
+      "post": {
+        "operationId": "transferCommunityOwnership",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Transfer community ownership",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). The owner hands over to an active member, who also owns the Announcements group; the previous owner becomes an admin.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.CommunityOwnerRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.Community"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/{communityId}/leave": {
+      "post": {
+        "operationId": "leaveCommunity",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Leave a community",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). Leaves the community and its groups (409 OWNER_MUST_TRANSFER_OR_DELETE for the owner).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityLeft"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/{communityId}/members": {
+      "get": {
+        "operationId": "listCommunityMembers",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "List community members",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. ADR 0073 (Communities). Any member; oldest first.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityMemberPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/{communityId}/members/{principalId}/role": {
+      "put": {
+        "operationId": "setCommunityMemberRole",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Change a member's role",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). Admins promote members to ADMIN; only the owner demotes another admin (an admin may step down).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "principalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.CommunityRoleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityMember"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/{communityId}/members/{principalId}": {
+      "delete": {
+        "operationId": "removeCommunityMember",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Remove a community member",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). Admins remove members; only the owner removes an admin; nobody removes the owner. The person also leaves the community's groups.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "principalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityMemberRemoved"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/{communityId}/bans": {
+      "get": {
+        "operationId": "listCommunityBans",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "List community bans",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. ADR 0073 (Communities). Admins.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityBanList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "banCommunityMember",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Ban someone from a community",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). Removes the person from the community and its groups and refuses every later admission (community and linked groups).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.CommunityBanRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityBan"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/{communityId}/bans/{principalId}": {
+      "delete": {
+        "operationId": "unbanCommunityMember",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Lift a community ban",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). Admins.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "principalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityBanLifted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/{communityId}/invitations": {
+      "get": {
+        "operationId": "listCommunityInvitations",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "List open community invitations",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. ADR 0073 (Communities). Admins see every open invitation, other inviting members their own.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityInvitationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "inviteToCommunity",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Invite people to a community",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). Any member of an OPEN or APPROVAL community, only admins of an INVITE_ONLY one. Members, banned people, open invitations and people Communications does not let the caller invite are skipped with a reason.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.CommunityInviteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityInviteResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/{communityId}/invitations/{invitationId}": {
+      "delete": {
+        "operationId": "revokeCommunityInvitation",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Revoke a community invitation",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). An admin or the inviter.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "invitationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityInvitation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/{communityId}/invite-links": {
+      "get": {
+        "operationId": "listCommunityInviteLinks",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "List community invite links",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. ADR 0073 (Communities). Never a token.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityInviteLinkList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createCommunityInviteLink",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Create a community invite link",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). The token is returned once (the QR code is drawn by the client from the link). At most 50 open links.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.CommunityInviteLinkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityInviteLink"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/{communityId}/invite-links/{linkId}/revoke": {
+      "post": {
+        "operationId": "revokeCommunityInviteLink",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Revoke a community invite link",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). Final; an admin or the link's creator.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "linkId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityInviteLink"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/{communityId}/join-requests": {
+      "get": {
+        "operationId": "listCommunityJoinRequests",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "List join requests",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. ADR 0073 (Communities). The requests the caller may decide: community admins all, a group's admins their group's. Oldest first.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "PENDING",
+                "APPROVED",
+                "REJECTED",
+                "CANCELLED"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityJoinRequestPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/{communityId}/join-requests/{requestId}/approve": {
+      "post": {
+        "operationId": "approveCommunityJoinRequest",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Approve a join request",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). The person joins the community (or the group, with a new history window).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityJoinRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/{communityId}/join-requests/{requestId}/reject": {
+      "post": {
+        "operationId": "rejectCommunityJoinRequest",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Reject a join request",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityJoinRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/{communityId}/groups": {
+      "get": {
+        "operationId": "listCommunityGroups",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "List a community's groups",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. ADR 0073 (Communities). Every live group (title, description, photo reference); member counts only to a group's own members, never a member list.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityGroupList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createCommunityGroup",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Create a group in a community",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). A new MANAGED group the caller owns, linked to the community (admins, or any member when membersCanAddGroups).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Optional: a retried creation with the same key (within 24 hours) returns the original (200) instead of creating another.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,128}$"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.CommunityGroupCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "An earlier creation with the same Idempotency-Key (replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityGroup"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/{communityId}/groups/link": {
+      "post": {
+        "operationId": "linkCommunityGroup",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Link an existing group",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). Only an OWNER / ADMIN of the group who may add groups to the community. Nothing about the group changes; people who join it later see only what is sent after they join.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.CommunityGroupLinkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/{communityId}/groups/order": {
+      "put": {
+        "operationId": "reorderCommunityGroups",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Reorder a community's groups",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). Community admins.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.CommunityGroupOrderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityGroupList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/{communityId}/groups/{conversationId}": {
+      "patch": {
+        "operationId": "updateCommunityGroup",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Change a group's access",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). OPEN (members join at once) or RESTRICTED (join requests); a community admin or the group's admins.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.CommunityGroupUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "unlinkCommunityGroup",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Unlink a group",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). A community admin or the group's admins; the group keeps its members and content. The Announcements group cannot be unlinked.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityGroupUnlinked"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/communities/{communityId}/groups/{conversationId}/join": {
+      "post": {
+        "operationId": "joinCommunityGroup",
+        "tags": [
+          "Communities"
+        ],
+        "summary": "Join a community group",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. ADR 0073 (Communities). Joins an OPEN group at once (201; a new history window: nothing earlier is visible), asks to join a RESTRICTED one (202), 200 when already a member.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "communityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.common.v1.CommunityJoinGroupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Already a member, or joined.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityJoinResult"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityJoinResult"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "A join request was created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.common.v1.CommunityJoinResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -14743,6 +17773,1098 @@
           "commit"
         ],
         "description": "An MLS Commit created in the group's current epoch. removedDeviceIds is the committer's attestation of the leaves it removes; while removals are pending it must cover them all. An external commit (a PublicMessage whose sender is new_member_commit, RFC 9420 section 12.4.3.2) is a member's own ACTIVE device joining by itself: accepted only from the acting principal's own device, without welcome or removedDeviceIds, and not while a removal of a device still in the tree is pending; every member's client verifies the joining leaf against the device directory before merging it."
+      },
+      "messaging.common.v1.Community": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "communityId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rules": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "privacy": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "APPROVAL",
+              "INVITE_ONLY"
+            ]
+          },
+          "membersCanAddGroups": {
+            "type": "boolean"
+          },
+          "ownerPrincipalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "announcementsConversationId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pictureRef": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "memberCount": {
+            "type": "integer"
+          },
+          "groupCount": {
+            "type": "integer"
+          },
+          "myRole": {
+            "type": "string",
+            "enum": [
+              "OWNER",
+              "ADMIN",
+              "MEMBER"
+            ]
+          },
+          "joinedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "joinedConversationIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          "pendingRequestCount": {
+            "type": "integer"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "communityId",
+          "name",
+          "privacy",
+          "membersCanAddGroups",
+          "ownerPrincipalId",
+          "memberCount",
+          "groupCount",
+          "myRole",
+          "joinedAt",
+          "joinedConversationIds",
+          "pendingRequestCount",
+          "version",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "messaging.common.v1.CommunityBan": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "principalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "bannedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "bannedByPrincipalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          }
+        },
+        "required": [
+          "principalId",
+          "bannedAt",
+          "bannedByPrincipalId"
+        ]
+      },
+      "messaging.common.v1.CommunityBanLifted": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "principalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "lifted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "principalId",
+          "lifted"
+        ]
+      },
+      "messaging.common.v1.CommunityBanList": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "bans": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/messaging.common.v1.CommunityBan"
+            }
+          }
+        },
+        "required": [
+          "bans"
+        ]
+      },
+      "messaging.common.v1.CommunityBanRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          }
+        },
+        "required": [
+          "principalId"
+        ]
+      },
+      "messaging.common.v1.CommunityCreateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 400,
+            "description": "1-100 characters."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 8192,
+            "description": "At most 2048 characters."
+          },
+          "rules": {
+            "type": "string",
+            "maxLength": 16000,
+            "description": "At most 4000 characters."
+          },
+          "privacy": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "APPROVAL",
+              "INVITE_ONLY"
+            ],
+            "description": "Default APPROVAL."
+          },
+          "membersCanAddGroups": {
+            "type": "boolean",
+            "description": "Default false: only admins add groups."
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "messaging.common.v1.CommunityDeleted": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "communityId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "deleted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "communityId",
+          "deleted"
+        ]
+      },
+      "messaging.common.v1.CommunityGroup": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "conversationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "title": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "avatarRef": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "securityProfile": {
+            "type": "string"
+          },
+          "access": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "RESTRICTED"
+            ]
+          },
+          "position": {
+            "type": "integer"
+          },
+          "announcements": {
+            "type": "boolean"
+          },
+          "joined": {
+            "type": "boolean"
+          },
+          "memberCount": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "myRole": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "canManage": {
+            "type": "boolean"
+          },
+          "pendingRequest": {
+            "type": "boolean"
+          },
+          "linkedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "conversationId",
+          "securityProfile",
+          "access",
+          "position",
+          "announcements",
+          "joined",
+          "canManage",
+          "pendingRequest",
+          "linkedAt"
+        ]
+      },
+      "messaging.common.v1.CommunityGroupCreateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 480,
+            "description": "1-120 characters."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "At most 512 characters."
+          },
+          "access": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "RESTRICTED"
+            ]
+          }
+        },
+        "required": [
+          "title"
+        ]
+      },
+      "messaging.common.v1.CommunityGroupLinkRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "conversationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "access": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "RESTRICTED"
+            ]
+          }
+        },
+        "required": [
+          "conversationId"
+        ]
+      },
+      "messaging.common.v1.CommunityGroupList": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/messaging.common.v1.CommunityGroup"
+            }
+          }
+        },
+        "required": [
+          "groups"
+        ]
+      },
+      "messaging.common.v1.CommunityGroupOrderRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "conversationIds": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        },
+        "required": [
+          "conversationIds"
+        ]
+      },
+      "messaging.common.v1.CommunityGroupUnlinked": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "conversationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "unlinked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "conversationId",
+          "unlinked"
+        ]
+      },
+      "messaging.common.v1.CommunityGroupUpdateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "access": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "RESTRICTED"
+            ]
+          }
+        },
+        "required": [
+          "access"
+        ]
+      },
+      "messaging.common.v1.CommunityInvitation": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "invitationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "communityId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "principalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "invitedByPrincipalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "ACCEPTED",
+              "DECLINED",
+              "REVOKED",
+              "EXPIRED"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "community": {
+            "$ref": "#/components/schemas/messaging.common.v1.CommunityPreview"
+          }
+        },
+        "required": [
+          "invitationId",
+          "communityId",
+          "principalId",
+          "invitedByPrincipalId",
+          "state",
+          "createdAt",
+          "expiresAt"
+        ]
+      },
+      "messaging.common.v1.CommunityInvitationList": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "invitations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/messaging.common.v1.CommunityInvitation"
+            }
+          }
+        },
+        "required": [
+          "invitations"
+        ]
+      },
+      "messaging.common.v1.CommunityInviteLink": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "inviteLinkId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "communityId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "maxUses": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "useCount": {
+            "type": "integer"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdByPrincipalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "EXPIRED",
+              "EXHAUSTED",
+              "REVOKED"
+            ]
+          },
+          "token": {
+            "type": "string",
+            "description": "mcl_ token; in the creation response only (only its SHA-256 is stored)."
+          }
+        },
+        "required": [
+          "inviteLinkId",
+          "communityId",
+          "useCount",
+          "expiresAt",
+          "createdByPrincipalId",
+          "createdAt",
+          "status"
+        ]
+      },
+      "messaging.common.v1.CommunityInviteLinkList": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "inviteLinks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/messaging.common.v1.CommunityInviteLink"
+            }
+          }
+        },
+        "required": [
+          "inviteLinks"
+        ]
+      },
+      "messaging.common.v1.CommunityInviteLinkRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expiresInSeconds": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 2592000,
+            "description": "Default 7 days."
+          },
+          "maxUses": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          }
+        },
+        "required": []
+      },
+      "messaging.common.v1.CommunityInviteRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principalIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        },
+        "required": [
+          "principalIds"
+        ]
+      },
+      "messaging.common.v1.CommunityInviteResult": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "invitations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/messaging.common.v1.CommunityInvitation"
+            }
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "principalId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "principalId",
+                "reason"
+              ]
+            }
+          }
+        },
+        "required": [
+          "invitations",
+          "skipped"
+        ]
+      },
+      "messaging.common.v1.CommunityJoinGroupRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": []
+      },
+      "messaging.common.v1.CommunityJoinRequest": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "requestId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "communityId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "communityName": {
+            "type": "string"
+          },
+          "principalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "conversationId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "groupTitle": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "APPROVED",
+              "REJECTED",
+              "CANCELLED"
+            ]
+          },
+          "message": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decidedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decidedByPrincipalId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "requestId",
+          "communityId",
+          "communityName",
+          "principalId",
+          "state",
+          "createdAt"
+        ]
+      },
+      "messaging.common.v1.CommunityJoinRequestPage": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "requests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/messaging.common.v1.CommunityJoinRequest"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "requests"
+        ]
+      },
+      "messaging.common.v1.CommunityJoinResult": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "JOINED",
+              "REQUESTED",
+              "ALREADY_MEMBER"
+            ]
+          },
+          "community": {
+            "$ref": "#/components/schemas/messaging.common.v1.Community"
+          },
+          "group": {
+            "$ref": "#/components/schemas/messaging.common.v1.CommunityGroup"
+          },
+          "request": {
+            "$ref": "#/components/schemas/messaging.common.v1.CommunityJoinRequest"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "messaging.common.v1.CommunityLeft": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "communityId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "left": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "communityId",
+          "left"
+        ]
+      },
+      "messaging.common.v1.CommunityMember": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "principalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "OWNER",
+              "ADMIN",
+              "MEMBER"
+            ]
+          },
+          "joinedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "principalId",
+          "role",
+          "joinedAt"
+        ]
+      },
+      "messaging.common.v1.CommunityMemberPage": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/messaging.common.v1.CommunityMember"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "members"
+        ]
+      },
+      "messaging.common.v1.CommunityMemberRemoved": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "principalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "principalId",
+          "state"
+        ]
+      },
+      "messaging.common.v1.CommunityOwnerRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          }
+        },
+        "required": [
+          "principalId"
+        ]
+      },
+      "messaging.common.v1.CommunityPage": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "communities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/messaging.common.v1.Community"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "communities"
+        ]
+      },
+      "messaging.common.v1.CommunityPreferences": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "chatListMode": {
+            "type": "string",
+            "enum": [
+              "TOGETHER",
+              "SEPARATE"
+            ]
+          }
+        },
+        "required": [
+          "chatListMode"
+        ]
+      },
+      "messaging.common.v1.CommunityPreview": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "communityId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rules": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "privacy": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "APPROVAL",
+              "INVITE_ONLY"
+            ]
+          },
+          "memberCount": {
+            "type": "integer"
+          },
+          "groupCount": {
+            "type": "integer"
+          },
+          "member": {
+            "type": "boolean"
+          },
+          "pendingRequest": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "communityId",
+          "name",
+          "privacy",
+          "memberCount",
+          "groupCount",
+          "member",
+          "pendingRequest"
+        ]
+      },
+      "messaging.common.v1.CommunityRoleRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "ADMIN",
+              "MEMBER"
+            ]
+          }
+        },
+        "required": [
+          "role"
+        ]
+      },
+      "messaging.common.v1.CommunityTokenRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "Optional note to the admins (a join request); at most 500 characters."
+          }
+        },
+        "required": [
+          "token"
+        ]
+      },
+      "messaging.common.v1.CommunityUpdateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "description": "Optional optimistic guard (409 VERSION_CONFLICT)."
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 400
+          },
+          "description": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 8192
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rules": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 16000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "privacy": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "APPROVAL",
+              "INVITE_ONLY"
+            ]
+          },
+          "membersCanAddGroups": {
+            "type": "boolean"
+          }
+        },
+        "required": []
       },
       "messaging.common.v1.ContextClass": {
         "type": "string",
