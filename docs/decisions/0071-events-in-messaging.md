@@ -135,6 +135,11 @@ All under `/v1/messaging/events`, acting principal required; reads `messages.rea
 `EventUpdateRequest`: the same fields except `scope`, `conversationId`, invitees and reminders
 (`null` clears an optional field), plus `version` (`409 VERSION_CONFLICT` when stale).
 
+`EventAttendees`: `eventId`, `counts`, `attendees` (`principalId`, `role`, `response`,
+`respondedAt`). `EventReminders`: `eventId`, `minutesBefore`. `EventDeleted`: `eventId`,
+`deleted`. The inbox action of the three notices is `OPEN_EVENT` (subject kind `EVENT`, catalogue
+#43-#45; the web opens `/dashboard/events/{eventId}`).
+
 `Event`: `eventId`, `scope`, `conversationId`, `title`, `description`, `location`, `type`,
 `meetingId`, `meetingUrl`, `coverMediaId`, `startsAt`, `endsAt`, `timeZone`, `allDay`,
 `recurrence`, `rrule`, `seriesEndsAt`, `state` (`ACTIVE` / `CANCELLED`), `cancelledAt`,
@@ -147,7 +152,7 @@ All under `/v1/messaging/events`, acting principal required; reads `messages.rea
 ## Activation (release steps, all off by default)
 
 1. Deploy (the migration runs with the release; nothing is notified).
-2. Notification Service: set the routing rows `MESSAGING_EVENTS` / `INBOX` and `PUSH` to
+2. Notification Service: set the routing rows `MESSAGING_EVENTS` / `IN_APP` and `PUSH` to
    enabled for `messaging.event.invited`, `messaging.event.cancelled` and
    `messaging.event.reminder` (seeded OFF by `m20261218_000001_messaging_event_notices`).
 3. Messaging: `MESSAGING_EVENT_NOTICES=on` (needs `CF_NOTIFICATIONS_BASE_URL`), restart.

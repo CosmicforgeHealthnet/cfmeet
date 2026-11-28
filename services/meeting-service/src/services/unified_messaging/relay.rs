@@ -151,6 +151,18 @@ const CONVERSATIONS: &[&str] = &[
     "orderBy",
 ];
 const MESSAGES: &[&str] = &["afterSequence", "beforeSequence", "limit", "threadRootId"];
+/// `GET v1/messaging/events` (ADR 0071): the views, calendar range, filters and keyset page.
+const EVENT_LIST: &[&str] = &[
+    "view",
+    "from",
+    "to",
+    "tz",
+    "conversationId",
+    "q",
+    "type",
+    "limit",
+    "cursor",
+];
 /// `GET v1/conversations/{id}/events`: Messaging's canonical replay cursor is `after`.
 const EVENTS: &[&str] = &["after", "limit"];
 
@@ -1122,6 +1134,135 @@ pub static ROUTES: &[RelayRoute] = &[
         &[],
         false,
     ),
+    // ADR 0071: Events (Messaging owns them; Meeting only relays).
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("events")],
+        EVENT_LIST,
+        false,
+    ),
+    r(Method::POST, &[Lit("messaging"), Lit("events")], &[], true),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("events"), Lit("calendar")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("events"), Lit("media")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("events"), Lit("media"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("events"), Lit("media"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("events"),
+            Lit("media"),
+            Id,
+            Lit("parts"),
+            Part,
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("events"),
+            Lit("media"),
+            Id,
+            Lit("complete"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("events"),
+            Lit("media"),
+            Id,
+            Lit("download-grants"),
+        ],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("events"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::PATCH,
+        &[Lit("messaging"), Lit("events"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("events"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("events"), Id, Lit("cancel")],
+        &[],
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[Lit("messaging"), Lit("events"), Id, Lit("rsvp")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("events"), Id, Lit("attendees")],
+        &[],
+        false,
+    ),
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("events"), Id, Lit("invitations")],
+        &[],
+        false,
+    ),
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("events"), Id, Lit("invitations"), Id],
+        &[],
+        false,
+    ),
+    r(
+        Method::PUT,
+        &[Lit("messaging"), Lit("events"), Id, Lit("reminders")],
+        &[],
+        false,
+    ),
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("events"), Id, Lit("ics")],
+        &[],
+        false,
+    ),
 ];
 
 // Bound the path segment independently of the domain reaction validation. Reject
@@ -1629,6 +1770,19 @@ mod tests {
                 format!("v1/messaging/channels/media/{C}/parts/63"),
             ),
             (Method::PUT, format!("v1/messaging/channels/{C}/follow")),
+            (Method::GET, "v1/messaging/events".into()),
+            (Method::POST, "v1/messaging/events".into()),
+            (Method::GET, "v1/messaging/events/calendar".into()),
+            (Method::GET, format!("v1/messaging/events/{C}")),
+            (Method::PUT, format!("v1/messaging/events/{C}/rsvp")),
+            (
+                Method::DELETE,
+                format!("v1/messaging/events/{C}/invitations/{C}"),
+            ),
+            (
+                Method::POST,
+                format!("v1/messaging/events/media/{C}/parts/7"),
+            ),
             (
                 Method::PUT,
                 format!("v1/messaging/history-transfers/{C}/sealed-history"),
@@ -1699,6 +1853,10 @@ mod tests {
                 format!("v1/messaging/status/media/{C}/parts/{C}"),
             ),
             (Method::GET, "v1/messaging/status/unknown".to_string()),
+            // Events: only their own shapes.
+            (Method::GET, "v1/messaging/events/unknown".to_string()),
+            (Method::POST, format!("v1/messaging/events/{C}")),
+            (Method::GET, format!("v1/messaging/events/{C}/invitations")),
             // Chat lists and polls: only their own shapes.
             (Method::GET, format!("v1/messaging/chat-lists/{C}")),
             (Method::PUT, "v1/messaging/chat-lists".to_string()),
