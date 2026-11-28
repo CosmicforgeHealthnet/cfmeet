@@ -1297,6 +1297,9 @@ async fn status_replies_are_listed_only_for_the_author() {
     let Some(w) = world().await else {
         return;
     };
+    // A reply is a message in the replier's direct chat with the author, which CF Meet's
+    // personal environment stores server-side (MANAGED, as in production since #177).
+    w.h.allow_managed(&w.c, "DIRECT").await;
     let (alice, bob, carol) = (w.person(), w.person(), w.person());
     let early = w.h.now() - Duration::days(3);
     for p in [bob, carol] {
