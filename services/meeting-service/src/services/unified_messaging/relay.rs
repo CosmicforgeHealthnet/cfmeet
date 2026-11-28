@@ -873,6 +873,12 @@ pub static ROUTES: &[RelayRoute] = &[
         false,
     ),
     r(
+        Method::PATCH,
+        &[Lit("messaging"), Lit("status"), Id],
+        &[],
+        false,
+    ),
+    r(
         Method::DELETE,
         &[Lit("messaging"), Lit("status"), Id],
         &[],
@@ -1620,6 +1626,7 @@ mod tests {
             (Method::GET, "v1/messaging/status/feed".into()),
             (Method::POST, "v1/messaging/status".into()),
             (Method::GET, format!("v1/messaging/status/{C}")),
+            (Method::PATCH, format!("v1/messaging/status/{C}")),
             (
                 Method::POST,
                 format!("v1/messaging/status/media/{C}/parts/0"),

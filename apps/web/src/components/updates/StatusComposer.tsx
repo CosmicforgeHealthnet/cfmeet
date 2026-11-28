@@ -15,6 +15,8 @@ import type { StatusItemInput } from "@/lib/status-publisher/types";
 import { VIDEO_EDIT_PROCESSOR } from "@/lib/status-publisher/video-edit-processor";
 import { BACKGROUNDS, errorText } from "./shared";
 import { textStatusToCreate } from "./status-adapter";
+import { AudienceButton, useStatusAudience, type StatusAudienceHandle } from "./audience";
+import MentionCaption, { captionMentions, EMPTY_CAPTION, type CaptionValue } from "./MentionCaption";
 
 type Mode = "text" | "media" | "voice";
 
@@ -32,6 +34,8 @@ const MAX_PHOTO_INPUT = 64 * 1024 * 1024;
  * is posted as small ≤ 720p MP4 parts of at most a minute each, one status per part. Elsewhere
  * the original is uploaded once and posted as consecutive one-minute time ranges.
  * Posting never blocks: items are queued (src/lib/status-publisher) and the editor closes.
+ * Every editor has the audience button beside Publish (this status only, every split part of
+ * it) and captions take @mentions of people the audience reaches.
  */
 export default function StatusComposer({ initial, onClose, onPosted }: { initial: Mode; onClose: () => void; onPosted: () => void }) {
   const [mode, setMode] = useState<Mode>(initial);
@@ -40,7 +44,9 @@ export default function StatusComposer({ initial, onClose, onPosted }: { initial
   const [preview, setPreview] = useState<string | null>(null);
   const [kind, setKind] = useState<MediaKind | null>(null);
   const [duration, setDuration] = useState<number | null>(null);
-  const [caption, setCaption] = useState("");
+  const [captionValue, setCaptionValue] = useState<CaptionValue>(EMPTY_CAPTION);
+  const caption = captionValue.text;
+  const audience = useStatusAudience();
   /** Set when the video can be edited and processed in this browser. */
   const [probe, setProbe] = useState<VideoProbe | null>(null);
   const [edit, setEdit] = useState<VideoEdit | null>(null);
@@ -76,7 +82,9 @@ export default function StatusComposer({ initial, onClose, onPosted }: { initial
   // Non-blocking (WhatsApp): queued, then processed / uploaded / published in the background
   // (src/lib/status-publisher); the Updates card shows "Adding…" and its progress.
   const enqueue = (item: StatusItemInput) => {
-    void enqueueStatus({ items: [item] }).catch((e) => toast(errorText(e, "Your status couldn't be added. Try again."), "error"));
+    const mentions = "caption" in item && item.caption ? captionMentions(captionValue, audience.members) : [];
+    const withMentions: StatusItemInput = mentions.length ? { ...item, mentions } : item;
+    void enqueueStatus({ items: [withMentions], ...audience.jobOptions() }).catch((e) => toast(errorText(e, "Your status couldn't be added. Try again."), "error"));
     onPosted();
     onClose();
   };
@@ -108,16 +116,15 @@ export default function StatusComposer({ initial, onClose, onPosted }: { initial
       ))}
     </div>
   );
-  const captionField = (
-    <input value={caption} maxLength={700} onChange={(e) => setCaption(e.target.value)} placeholder="Add a caption…" aria-label="Caption"
-      className="h-12 min-w-0 w-full flex-1 rounded-full bg-white/10 px-5 text-base text-white placeholder:text-white/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary" />
-  );
+  const captionField = <MentionCaption value={captionValue} onChange={setCaptionValue} people={audience.mentionable} />;
+  const audienceButton = <AudienceButton audience={audience} />;
 
   if (mode === "media" && file && kind === "VIDEO" && probe) {
     return (
       <VideoEditor file={file} probe={probe} onChange={setEdit} onClose={onClose}
         footer={(
           <div className="space-y-2 bg-gradient-to-t from-black via-black/80 to-transparent p-3" data-testid="status-composer">
+            <div className="flex justify-end">{audienceButton}</div>
             <div className="flex items-center gap-2">
               {captionField}
               <button type="button" aria-label="Post status" data-testid="status-send" disabled={!edit} onClick={postVideo}
@@ -134,11 +141,11 @@ export default function StatusComposer({ initial, onClose, onPosted }: { initial
     <div className="fixed inset-0 z-[70] flex flex-col bg-black text-white" role="dialog" aria-label="Add status" data-testid="status-composer">
       <input ref={picker} type="file" accept="image/*,video/*" className="hidden" onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = ""; }} />
       {mode === "voice" ? (
-        <VoiceStatus bg={BACKGROUNDS[bg]} onCycle={() => setBg((bg + 1) % BACKGROUNDS.length)} onClose={onClose} onPosted={() => { onPosted(); onClose(); }} />
+        <VoiceStatus bg={BACKGROUNDS[bg]} audience={audience} onCycle={() => setBg((bg + 1) % BACKGROUNDS.length)} onClose={onClose} onPosted={() => { onPosted(); onClose(); }} />
       ) : mode === "text" ? (
-        <TextStatusEditor onCancel={onClose} onDone={postText} footer={tabs} />
+        <TextStatusEditor onCancel={onClose} onDone={postText} footer={<div className="flex flex-wrap items-center gap-2">{tabs}{audienceButton}</div>} />
       ) : file && kind === "IMAGE" ? (
-        <PhotoEditor file={file} onCancel={() => { setFile(null); setKind(null); }} onDone={(r) => postPhoto(r.blob)} doneLabel="Post status" footer={captionField} />
+        <PhotoEditor file={file} onCancel={() => { setFile(null); setKind(null); }} onDone={(r) => postPhoto(r.blob)} doneLabel="Post status" doneExtra={audienceButton} footer={captionField} />
       ) : (
         <>
           <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between p-4">
@@ -162,6 +169,7 @@ export default function StatusComposer({ initial, onClose, onPosted }: { initial
                 {captionField}
               </>
             ) : null}
+            {preview ? <div className="flex justify-end">{audienceButton}</div> : null}
             <div className="flex items-center gap-2">
               {tabs}
               <button type="button" aria-label="Post status" data-testid="status-send" disabled={!file || kind !== "VIDEO"} onClick={postVideo}
@@ -177,7 +185,7 @@ export default function StatusComposer({ initial, onClose, onPosted }: { initial
 }
 
 /** Voice status: hold the microphone to record (at most a minute), then post. */
-function VoiceStatus({ bg, onCycle, onClose, onPosted }: { bg: string; onCycle: () => void; onClose: () => void; onPosted: () => void }) {
+function VoiceStatus({ bg, audience, onCycle, onClose, onPosted }: { bg: string; audience: StatusAudienceHandle; onCycle: () => void; onClose: () => void; onPosted: () => void }) {
   const [recording, setRecording] = useState(false);
   const [clip, setClip] = useState<{ blob: Blob; url: string; ms: number } | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -220,7 +228,7 @@ function VoiceStatus({ bg, onCycle, onClose, onPosted }: { bg: string; onCycle: 
   };
   const post = () => {
     if (!clip) return;
-    void enqueueStatus({ items: [{ kind: "AUDIO", blob: clip.blob, durationMs: clip.ms, background: bg }] }).catch((e) => toast(errorText(e, "Your voice status couldn't be added."), "error"));
+    void enqueueStatus({ items: [{ kind: "AUDIO", blob: clip.blob, durationMs: clip.ms, background: bg }], ...audience.jobOptions() }).catch((e) => toast(errorText(e, "Your voice status couldn't be added."), "error"));
     onPosted();
   };
   const secs = Math.floor((clip ? clip.ms : elapsed) / 1000);
@@ -240,6 +248,7 @@ function VoiceStatus({ bg, onCycle, onClose, onPosted }: { bg: string; onCycle: 
         <p className="text-sm text-white/80">{recording ? "Release to stop · at most 1 minute" : clip ? "Listen, then post — or hold to record again" : "Hold the microphone to record"}</p>
       </div>
       <div className="flex items-center justify-end gap-3 p-4 pb-[max(env(safe-area-inset-bottom),1rem)]">
+        <span className="mr-auto min-w-0"><AudienceButton audience={audience} /></span>
         {clip ? (
           <button type="button" aria-label="Post voice status" onClick={post} className="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg disabled:opacity-50"><Send className="size-6" /></button>
         ) : null}

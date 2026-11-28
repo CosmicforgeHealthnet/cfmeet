@@ -261,6 +261,9 @@ export class StatusQueue {
       error: null,
       fatal: false,
       hasProcess: false,
+      audience: input.audience ? { ...input.audience, ...(input.audience.principalIds ? { principalIds: [...input.audience.principalIds] } : {}) } : null,
+      allowSharing: typeof input.allowSharing === "boolean" ? input.allowSharing : null,
+      audienceLabel: input.audienceLabel ?? null,
     };
     const toStore: [string, Blob][] = [];
     const keep = (key: string, blob: Blob) => { this.blobs.set(key, blob); toStore.push([key, blob]); return key; };
@@ -278,23 +281,25 @@ export class StatusQueue {
       job.posts.push({ sequence: job.posts.length, item, idempotencyKey: this.uuid(), uploadKey, body, postId: null, uncertain: false, ...(placeholder ? { placeholder } : {}) });
     };
     const clean = (s: string | undefined) => (s && s.trim() ? s.trim() : undefined);
+    const mentionsOf = (m: string[] | undefined) => (m && m.length ? [...new Set(m)] : undefined);
 
     // The card previews the job's last item.
     for (const [i, item] of input.items.entries()) {
+      const mentions = mentionsOf(item.mentions);
       switch (item.kind) {
         case "TEXT":
-          addPost(i, null, { kind: "TEXT", text: item.text, background: item.background, font: item.font });
+          addPost(i, null, { kind: "TEXT", text: item.text, background: item.background, font: item.font, mentions });
           job.preview = { kind: "TEXT", text: item.text, background: item.background ?? null, font: item.font ?? 0 };
           break;
         case "IMAGE": {
           const u = addUpload(i, item.blob, "IMAGE", null);
-          addPost(i, u.key, { kind: "IMAGE", caption: clean(item.caption) });
+          addPost(i, u.key, { kind: "IMAGE", caption: clean(item.caption), mentions });
           job.preview = { kind: "IMAGE", blobKey: item.preview ? keep(`${id}/preview`, item.preview) : u.blobKey };
           break;
         }
         case "AUDIO": {
           const u = addUpload(i, item.blob, "AUDIO", item.durationMs);
-          addPost(i, u.key, { kind: "AUDIO", caption: clean(item.caption) });
+          addPost(i, u.key, { kind: "AUDIO", caption: clean(item.caption), mentions });
           job.preview = { kind: "AUDIO", blobKey: null, background: item.background ?? null };
           break;
         }
@@ -311,20 +316,20 @@ export class StatusQueue {
                 ms = await this.probeDuration(blob);
               }
               const u = addUpload(i, blob, "VIDEO", ms);
-              addPost(i, u.key, { kind: "VIDEO", startMs: 0, endMs: Math.round(ms), caption: s === 0 ? caption : undefined });
+              addPost(i, u.key, { kind: "VIDEO", startMs: 0, endMs: Math.round(ms), caption: s === 0 ? caption : undefined, mentions: s === 0 ? mentions : undefined });
             }
           } else if ("source" in item) {
             if (!item.ranges.length) throw new Error("A video needs at least one range.");
             const u = addUpload(i, item.source, "VIDEO", item.durationMs);
             for (const [r, range] of item.ranges.entries()) {
-              addPost(i, u.key, { kind: "VIDEO", startMs: Math.round(range.startMs), endMs: Math.round(range.endMs), caption: r === 0 ? caption : undefined });
+              addPost(i, u.key, { kind: "VIDEO", startMs: Math.round(range.startMs), endMs: Math.round(range.endMs), caption: r === 0 ? caption : undefined, mentions: r === 0 ? mentions : undefined });
             }
           } else {
             if (job.process) throw new Error("At most one deferred video per status job.");
             if ("process" in item) {
-              job.process = { itemIndex: i, mode: "named", processor: item.process.processor, inputBlobKey: keep(`${id}/input`, item.process.input), params: item.process.params ?? null, caption: caption ?? null };
+              job.process = { itemIndex: i, mode: "named", processor: item.process.processor, inputBlobKey: keep(`${id}/input`, item.process.input), params: item.process.params ?? null, caption: caption ?? null, mentions: mentions ?? null };
             } else {
-              job.process = { itemIndex: i, mode: "closure", processor: null, inputBlobKey: null, params: null, caption: caption ?? null };
+              job.process = { itemIndex: i, mode: "closure", processor: null, inputBlobKey: null, params: null, caption: caption ?? null, mentions: mentions ?? null };
               this.closures.set(id, item.prepare);
             }
             addPost(i, null, { kind: "VIDEO" }, true);
@@ -583,7 +588,7 @@ export class StatusQueue {
       : fresh.map((u) => ({ uploadKey: u.key, startMs: 0, endMs: u.durationMs ?? 0 }));
     const posts: StoredPost[] = bodies.map((b, s) => ({
       sequence: 0, item: p.itemIndex, idempotencyKey: this.uuid(), uploadKey: b.uploadKey,
-      body: { kind: "VIDEO", startMs: b.startMs, endMs: b.endMs, caption: s === 0 && p.caption ? p.caption : undefined },
+      body: { kind: "VIDEO", startMs: b.startMs, endMs: b.endMs, caption: s === 0 && p.caption ? p.caption : undefined, mentions: s === 0 && p.mentions?.length ? p.mentions : undefined },
       postId: null, uncertain: false,
     }));
     // The placeholder's key is kept for the first piece: one key per item for its whole life.
@@ -712,7 +717,10 @@ export class StatusQueue {
 
   private async publishPost(job: StoredJob, post: StoredPost, signal: AbortSignal): Promise<void> {
     const upload = post.uploadKey ? job.uploads.find((u) => u.key === post.uploadKey) : null;
+    // The job's audience and sharing go with EVERY create (each split segment, each item).
     const req = { ...post.body, groupId: job.groupId, sequence: post.sequence } as Record<string, unknown>;
+    if (job.audience) req.audience = job.audience;
+    if (typeof job.allowSharing === "boolean") req.allowSharing = job.allowSharing;
     if (upload) req.mediaId = upload.mediaId;
     for (const k of Object.keys(req)) if (req[k] === undefined) delete req[k];
     const request = req as unknown as StatusCreateRequest;
@@ -829,6 +837,7 @@ export class StatusQueue {
       preview: this.previewView(job),
       postCount: job.posts.length,
       publishedCount: published,
+      audienceLabel: job.audienceLabel ?? null,
     };
   }
 

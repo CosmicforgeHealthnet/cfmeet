@@ -17,9 +17,9 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 | Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.11.0 | 322 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.10.0 | 77 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.35.0 | 146 |
-| Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.25.0 | 168 |
+| Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.26.0 | 169 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.10.0 | 104 |
-| **Total** | | | **817** |
+| **Total** | | | **818** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -1000,7 +1000,7 @@ Contract `packages/contracts/calling/http/v1.openapi.json` version **1.35.0**; b
 
 ## Messaging (MANAGED and PRIVATE_E2EE)
 
-Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.25.0**; base URL env `NEXT_PUBLIC_MESSAGING_URL`. First-party clients go through the Meeting Service relay `/api/v2/messaging/relay/{path}` (personal) or `/api/v2/organizations/{id}/messaging/relay/{path}` (organization), then realtime with a session token -> ticket -> WebSocket.
+Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.26.0**; base URL env `NEXT_PUBLIC_MESSAGING_URL`. First-party clients go through the Meeting Service relay `/api/v2/messaging/relay/{path}` (personal) or `/api/v2/organizations/{id}/messaging/relay/{path}` (organization), then realtime with a session token -> ticket -> WebSocket.
 
 ### Blocked Users
 
@@ -1307,6 +1307,7 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.25.0**;
 | POST | `/v1/messaging/status/rings` | customer credential (server-side only) | Status rings | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#getStatusRings` |
 | DELETE | `/v1/messaging/status/{statusId}` | customer credential (server-side only) | Delete a status | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#deleteStatus` |
 | GET | `/v1/messaging/status/{statusId}` | customer credential (server-side only) | Get a status | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#getStatus` |
+| PATCH | `/v1/messaging/status/{statusId}` | customer credential (server-side only) | Change a status's sharing | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#updateStatus` |
 | POST | `/v1/messaging/status/{statusId}/forwards` | customer credential (server-side only) | Forward a status | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#forwardStatus` |
 | DELETE | `/v1/messaging/status/{statusId}/reaction` | customer credential (server-side only) | Remove my status reaction | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#unreactToStatus` |
 | PUT | `/v1/messaging/status/{statusId}/reaction` | customer credential (server-side only) | React to a status | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#reactToStatus` |

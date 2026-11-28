@@ -170,16 +170,7 @@ jobs:
           for c in pending:
               print("::warning::apps/web still calls removed %s %s (%s): passwordless frontend handover pending"
                     % (c["method"], c["path"], c["sites"][0]))
-          # TRANSITIONAL (one release; remove after #193 is deployed): the web client falls back
-          # to the previous Meeting /api/v2/social/* API from social.legacy.ts only, while the
-          # backend still runs the release before #193 (ADR 0069 "Rollout").
-          transitional = [c for c in report["calls"] if c["bucket"] == "UNMATCHED"
-                          and c["path"].startswith("/api/v2/social/")
-                          and all(site.startswith("src/services/v2/social.legacy.ts") for site in c["sites"])]
-          if transitional:
-              print("::warning::%d transitional /api/v2/social calls (social.legacy.ts): remove after #193 is deployed" % len(transitional))
-          unmatched = [c for c in report["calls"] if c["bucket"] == "UNMATCHED" and (c["method"], c["path"]) not in baseline
-                       and c not in transitional]
+          unmatched = [c for c in report["calls"] if c["bucket"] == "UNMATCHED" and (c["method"], c["path"]) not in baseline]
           for c in unmatched:
               print("::error::apps/web calls %s %s (%s) but no contract operation has this path"
                     % (c["method"], c["path"], c["sites"][0]))

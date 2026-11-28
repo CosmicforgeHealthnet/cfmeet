@@ -929,6 +929,52 @@ async fn close_friends_lists_preferences_and_sharing() {
     )
     .await;
     assert!(!w.sees(bob, reshared).await);
+
+    // "Allow sharing" per status: only its author changes it; forwards and reshares then refuse.
+    let later = w
+        .text_status(
+            alice,
+            json!({ "audience": { "mode": "ONLY", "principalIds": [bob] }, "allowSharing": true }),
+        )
+        .await;
+    let path = format!("/v1/messaging/status/{later}");
+    let other = w
+        .call(
+            Method::PATCH,
+            bob,
+            &path,
+            Some(json!({ "allowSharing": false })),
+        )
+        .await;
+    assert_eq!(other.status.as_u16(), 404, "{}", other.text);
+    let off = w
+        .call(
+            Method::PATCH,
+            alice,
+            &path,
+            Some(json!({ "allowSharing": false })),
+        )
+        .await;
+    assert_eq!(off.status.as_u16(), 200, "{}", off.text);
+    assert_eq!(off.json["allowSharing"], false);
+    assert_eq!(w.get(bob, &path).await.json["allowSharing"], false);
+    let refused = w
+        .post(
+            bob,
+            &format!("/v1/messaging/status/{later}/reshares"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(refused.status.as_u16(), 409, "{}", refused.text);
+    let on = w
+        .call(
+            Method::PATCH,
+            alice,
+            &path,
+            Some(json!({ "allowSharing": true })),
+        )
+        .await;
+    assert_eq!(on.json["allowSharing"], true, "{}", on.text);
 }
 
 #[tokio::test]
