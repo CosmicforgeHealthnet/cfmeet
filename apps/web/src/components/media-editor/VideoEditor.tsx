@@ -49,6 +49,7 @@ import {
 
 import { BRUSH_SIZES, createSticker, createText, OVERLAY_COLORS, updateOverlay, type Overlay, type TextOverlay } from "@/lib/media-editor/overlays";
 import { hasVisibleOverlays } from "@/lib/media-editor/video-overlays";
+import { fadeGain, type MusicSettings } from "@/lib/media-editor/audio";
 import EmojiPicker from "./EmojiPicker";
 import OverlayLayer from "./OverlayLayer";
 import TextOverlayEditor, { DEFAULT_TEXT_DRAFT, type TextDraft } from "./TextOverlayEditor";
@@ -82,6 +83,8 @@ export type VideoEditorProps = {
    */
   initialOverlays?: Overlay[];
   onOverlaysChange?: (overlays: Overlay[]) => void;
+  /** Music to hear with the preview, in step with the posted timeline (the export mixes it for real). */
+  previewMusic?: { file: Blob; settings: MusicSettings } | null;
 };
 
 /**
@@ -154,7 +157,29 @@ const STEP_MS = 100;
 type Tag = "edit" | "overlay";
 type Tool = "none" | "draw" | "sticker";
 
-function Editor({ file, value, onChange, overlaySlot, toolbarExtra, footer, onClose, probe, estimate, initialOverlays, onOverlaysChange }: VideoEditorProps & { probe: VideoProbe }) {
+function Editor({ file, value, onChange, overlaySlot, toolbarExtra, footer, onClose, probe, estimate, initialOverlays, onOverlaysChange, previewMusic }: VideoEditorProps & { probe: VideoProbe }) {
+  const musicEl = useRef<HTMLAudioElement>(null);
+  const musicRef = useRef(previewMusic);
+  useEffect(() => { musicRef.current = previewMusic; });
+  const musicFile = previewMusic?.file;
+  useEffect(() => {
+    const a = musicEl.current;
+    if (!a || !musicFile) return;
+    const url = URL.createObjectURL(musicFile);
+    a.src = url;
+    return () => { a.pause(); a.removeAttribute("src"); a.load(); URL.revokeObjectURL(url); };
+  }, [musicFile]);
+  /** Keeps the preview music at `timelineMs` of the posted timeline (or silent). */
+  const syncMusic = (timelineMs: number | null) => {
+    const a = musicEl.current;
+    const m = musicRef.current?.settings;
+    if (!a || !m || !a.src) return;
+    const target = timelineMs === null ? null : m.startMs + timelineMs;
+    if (target === null || target >= m.endMs) { if (!a.paused) a.pause(); return; }
+    if (Math.abs(a.currentTime * 1000 - target) > 300) a.currentTime = target / 1000;
+    a.volume = Math.min(1, fadeGain(target, m));
+    if (a.paused) void a.play().catch(() => {});
+  };
   const historyRef = useRef<EditHistory | null>(null);
   const [history, setHistory] = useState<EditHistory>(() => createHistory(value ?? initialVideoEdit(probe.durationMs)));
   const edit = history.present;
@@ -262,11 +287,13 @@ function Editor({ file, value, onChange, overlaySlot, toolbarExtra, footer, onCl
         if (t >= seg.endMs - 20 || el.ended) {
           if (loopPart) el.currentTime = seg.startMs / 1000;
           else if (i + 1 < segs.length) { setPart(i + 1); el.currentTime = segs[i + 1].startMs / 1000; }
-          else { el.pause(); setPlaying(false); setPart(0); el.currentTime = segs[0].startMs / 1000; setTimeMs(segs[0].startMs); return; }
+          else { el.pause(); syncMusic(null); setPlaying(false); setPart(0); el.currentTime = segs[0].startMs / 1000; setTimeMs(segs[0].startMs); return; }
         } else if (t < seg.startMs - 250) {
           el.currentTime = seg.startMs / 1000;
         }
         setTimeMs(el.currentTime * 1000);
+        const before = segs.slice(0, i).reduce((sum, x) => sum + (x.endMs - x.startMs), 0);
+        syncMusic(loopPart ? null : before + Math.max(0, t - seg.startMs));
       }
       raf = requestAnimationFrame(tick);
     };
@@ -294,7 +321,7 @@ function Editor({ file, value, onChange, overlaySlot, toolbarExtra, footer, onCl
     setLoopPart(loop);
     void el.play().then(() => setPlaying(true), () => setPlaying(false));
   };
-  const pause = () => { video.current?.pause(); setPlaying(false); };
+  const pause = () => { video.current?.pause(); syncMusic(null); setPlaying(false); };
   const toggle = () => (playing ? pause() : play());
 
   const undo = () => {
@@ -449,8 +476,9 @@ function Editor({ file, value, onChange, overlaySlot, toolbarExtra, footer, onCl
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="relative overflow-hidden" style={{ width: box.width, height: box.height }}
             onClick={() => { if (!cropMode) toggle(); }}>
+            <audio ref={musicEl} preload="auto" className="hidden" />
             <video ref={video} playsInline preload="auto" aria-label="Video preview"
-              onPause={() => setPlaying(false)}
+              onPause={() => { syncMusic(null); setPlaying(false); }}
               className="pointer-events-none absolute max-w-none"
               style={{
                 width: elW,

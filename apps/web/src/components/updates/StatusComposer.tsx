@@ -350,7 +350,7 @@ function MediaStep({ file, last, position, audienceButton, captionField, caption
       <>
         {top}
         <VideoEditor file={file} probe={probe} onChange={setEdit} onClose={onCancel} onOverlaysChange={(o) => { overlays.current = o; }}
-          estimate={{ hasMusic: Boolean(music) }}
+          estimate={{ hasMusic: Boolean(music) }} previewMusic={music ? { file: music.file, settings: music.settings } : null}
           toolbarExtra={<MusicButton music={music} onClick={() => setPicking(true)} />}
           footer={(
             <div className="space-y-2 bg-gradient-to-t from-black via-black/80 to-transparent p-3" data-testid="status-composer">
