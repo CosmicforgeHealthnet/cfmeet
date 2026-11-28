@@ -57,6 +57,7 @@ mod m20261216_000044_chat_organization_polls;
 mod m20261217_000045_status_channels;
 mod m20261218_000046_events;
 mod m20261219_000047_channels_complete;
+mod m20261220_000048_communities;
 
 /// Name of the table recording which Messaging migrations have been applied.
 pub const MIGRATION_TABLE: &str = "messaging_seaql_migrations";
@@ -167,6 +168,7 @@ where
     pending.extend(chat_organization_pending(db).await?);
     pending.extend(social_pending(db).await?);
     pending.extend(events_pending(db).await?);
+    pending.extend(communities_pending(db).await?);
     // Every history's names start with their timestamp: report them in timestamp order,
     // whichever history they belong to.
     pending.sort();
@@ -612,6 +614,66 @@ where
     if applied.iter().any(|v| !known.contains(v)) {
         return Err(sea_orm_migration::sea_orm::DbErr::Custom(
             "an events migration is applied but unknown to this binary".into(),
+        ));
+    }
+    Ok(known.into_iter().filter(|m| !applied.contains(m)).collect())
+}
+
+/// Name of the table recording the Communities history ([`CommunitiesMigrator`]).
+pub const COMMUNITIES_MIGRATION_TABLE: &str = "messaging_communities_seaql_migrations";
+
+/// Communities (ADR 0073): a SEPARATE, additive history applied by `messaging-migration up`
+/// after [`SocialMigrator`]. The previous image fails closed on unknown migrations of the
+/// histories it knows, so appending to one of them would stop it after a rollback; it never
+/// reads this table. This image requires it: [`pending_migrations`] includes it.
+pub struct CommunitiesMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for CommunitiesMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(self::m20261220_000048_communities::Migration)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new(COMMUNITIES_MIGRATION_TABLE).into_iden()
+    }
+}
+
+/// The Communities migrations not yet applied (read-only; fails closed on unknown ones).
+pub async fn communities_pending<C>(
+    db: &C,
+) -> Result<Vec<String>, sea_orm_migration::sea_orm::DbErr>
+where
+    C: sea_orm_migration::sea_orm::ConnectionTrait,
+{
+    use sea_orm_migration::sea_orm::Statement;
+    let known: Vec<String> = CommunitiesMigrator::migrations()
+        .iter()
+        .map(|m| m.name().to_string())
+        .collect();
+    let backend = db.get_database_backend();
+    let present = db
+        .query_one(Statement::from_string(
+            backend,
+            format!("SELECT to_regclass('{COMMUNITIES_MIGRATION_TABLE}') IS NOT NULL AS present"),
+        ))
+        .await?
+        .map(|r| r.try_get::<bool>("", "present"))
+        .transpose()?
+        .unwrap_or(false);
+    if !present {
+        return Ok(known);
+    }
+    let applied = db
+        .query_all(Statement::from_string(
+            backend,
+            format!("SELECT version FROM {COMMUNITIES_MIGRATION_TABLE}"),
+        ))
+        .await?
+        .iter()
+        .map(|r| r.try_get::<String>("", "version"))
+        .collect::<Result<std::collections::HashSet<_>, _>>()?;
+    if applied.iter().any(|v| !known.contains(v)) {
+        return Err(sea_orm_migration::sea_orm::DbErr::Custom(
+            "a communities migration is applied but unknown to this binary".into(),
         ));
     }
     Ok(known.into_iter().filter(|m| !applied.contains(m)).collect())

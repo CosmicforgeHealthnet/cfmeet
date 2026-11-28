@@ -487,7 +487,11 @@ async fn activate<C: ConnectionTrait>(
         let view = member_row(txn, conversation_id, request.principal_id).await?;
         return Ok((200, view));
     }
-    if banned(txn, conversation_id, request.principal_id).await? {
+    if banned(txn, conversation_id, request.principal_id).await?
+        // ADR 0073: a community ban also keeps the person out of the community's groups.
+        || crate::communities::banned_from_conversation(txn, conversation_id, request.principal_id)
+            .await?
+    {
         return Err(Error::reason(
             ErrorCode::PrincipalNotAuthorized,
             "PRINCIPAL_BANNED",
@@ -823,6 +827,17 @@ pub async fn remove(
                     )
                     .await?;
                     return member_row(txn, conversation_id, principal).await;
+                }
+                // ADR 0073: a community's Announcements group follows the community's
+                // membership (people leave or are removed through the community).
+                if matches!(admin, Administrator::Principal(_))
+                    && target.as_ref().is_some_and(Membership::is_active)
+                    && crate::communities::is_announcements(txn, conversation_id).await?
+                {
+                    return Err(Error::reason(
+                        ErrorCode::Conflict,
+                        "COMMUNITY_ANNOUNCEMENTS_MEMBERSHIP",
+                    ));
                 }
                 if !leaving {
                     require_moderator(

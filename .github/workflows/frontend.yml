@@ -101,6 +101,11 @@ jobs:
       # grid, list queries and paging, event links in chats, and the relay allowlist entries.
       - name: Events tests
         run: node --experimental-strip-types --test tests/events.test.mjs
+      # Communities (ADR 0073, Messaging): validation, role permissions mirroring the server, group
+      # order, invite links, the Communities chat filter and together / separate preference, and
+      # every client request on the relay allowlist.
+      - name: Communities tests
+        run: node --experimental-strip-types --test tests/communities.test.mjs
 
       # FE-015: src/types/generated/meeting-service.ts matches the served OpenAPI contract.
       - name: Contract types are fresh

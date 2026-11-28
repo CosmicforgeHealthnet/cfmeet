@@ -55,6 +55,8 @@ pub fn customer_routes() -> Router<AppState> {
         .merge(crate::social::http::routes())
         // ADR 0071: Events.
         .merge(crate::calendar::http::routes())
+        // ADR 0073: Communities.
+        .merge(crate::communities::http::routes())
         .merge(crate::conversations::chat_lists::routes())
 }
 

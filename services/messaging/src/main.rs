@@ -602,6 +602,21 @@ async fn main() -> anyhow::Result<()> {
             ));
             tracing::info!("event notices and reminders are relayed to the Notification Service");
         }
+        // ADR 0073: community invitation / join-request / approval notices (their catalogue
+        // types must be active in the Notification Service first).
+        if std::env::var("MESSAGING_COMMUNITY_NOTICES").as_deref() == Ok("on") {
+            state.community_notices = true;
+            tokio::spawn(messaging::communities::notices::run(
+                state.clone(),
+                Arc::new(
+                    messaging::notification_publications::NotificationServiceEvents::new(
+                        state.service_auth.client(),
+                    ),
+                ),
+                config.workers.interval,
+            ));
+            tracing::info!("community notices are relayed to the Notification Service");
+        }
     } else {
         tracing::info!(
             "CF_NOTIFICATIONS_BASE_URL is not set: notification publications are not relayed"

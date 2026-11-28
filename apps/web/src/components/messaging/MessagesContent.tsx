@@ -68,6 +68,7 @@ import MessagingDevicesPanel from "./MessagingDevicesPanel";
 import { useSharedMessagingEngine } from "./MessagingEngineProvider";
 import { EmojiPicker } from "./EmojiPicker";
 import { usePeoplePicker } from "./people-picker";
+import { useCommunityChats } from "@/hooks/v2/useCommunities";
 import { authService } from "@/services/auth.service";
 import EventForm from "@/components/events/EventForm";
 import { EventLinkCards } from "@/components/events/EventLinkCard";
@@ -1873,6 +1874,8 @@ function PersonalMessages() {
   const archivedChats = s.conversations.filter((c) => c.archived);
   // A list deleted on another device stops being the filter.
   const filter = liveFilter(chosenFilter, s.chatLists);
+  // ADR 0073: community groups (the Communities filter; shown separately when the user prefers).
+  const community = useCommunityChats(!!s.identity);
   const statusCopies = new Set<string>();
   const needle = search.trim().toLocaleLowerCase();
   const conversations = arrangeChats(s.conversations, showArchived && archivedChats.length > 0).filter((conversation) => {
@@ -1884,11 +1887,11 @@ function PersonalMessages() {
       statusCopies.add(post);
     } else if (filter.kind === "status") return false;
     // Search stays inside the chosen filter (WhatsApp).
-    return conversation.title.toLocaleLowerCase().includes(needle) && matchesChatFilter(conversation, filter, { selected, lists: s.chatLists });
+    return conversation.title.toLocaleLowerCase().includes(needle) && matchesChatFilter(conversation, filter, { selected, lists: s.chatLists, communityIds: community.ids, communitiesSeparate: community.separate });
   });
   // WhatsApp's filters; "Private" only while the account still has older encrypted chats.
   const hasPrivate = s.conversations.some((c) => c.securityProfile === "PRIVATE_E2EE");
-  const chips = filterChips({ unread: unreadTotal, hasPrivate, lists: s.chatLists });
+  const chips = filterChips({ unread: unreadTotal, hasPrivate, lists: s.chatLists, communities: community.ids.size > 0 });
   const me = s.identity?.principalId ?? null;
   const shownRows = conversations.slice(0, rowLimit);
   // Status rings of the people in the shown DIRECT chats (only those whose status we may see).

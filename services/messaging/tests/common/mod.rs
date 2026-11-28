@@ -163,6 +163,9 @@ async fn template(admin: &str) -> String {
             messaging_migration::EventsMigrator::up(&tmpl, None)
                 .await
                 .expect("events migrations apply");
+            messaging_migration::CommunitiesMigrator::up(&tmpl, None)
+                .await
+                .expect("communities migrations apply");
             tmpl.close().await.ok();
             name
         })
