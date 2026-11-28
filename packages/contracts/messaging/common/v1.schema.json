@@ -3194,6 +3194,41 @@
     },
     "EventPage": {
       "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ConversationEvent"
+          }
+        },
+        "nextAfter": {
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hasMore": {
+          "type": "boolean"
+        },
+        "syncRequired": {
+          "type": "boolean",
+          "description": "The requested position is older than the retained event window: resynchronize messages by sequence."
+        }
+      },
+      "required": [
+        "events",
+        "nextAfter",
+        "hasMore",
+        "syncRequired"
+      ]
+    },
+    "CalendarEventPage": {
+      "type": "object",
       "additionalProperties": true,
       "properties": {
         "items": {

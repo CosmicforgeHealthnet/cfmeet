@@ -1079,6 +1079,53 @@ class Conversation {
   Map<String, Object?> toJson() => json;
 }
 
+/// A durable conversation event (derived from committed state, replayable by its per-conversation eventSequence). Every durable event names its tenant, application and environment (§117).
+class ConversationEvent {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ConversationEvent.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ConversationEvent.create({required Uuid applicationId, required Uuid conversationId, required Map<String, Object?> data, required Uuid environmentId, required String eventId, required int eventSequence, required String occurredAt, required int schemaVersion, required Uuid tenantId, required String type$}) =>
+      ConversationEvent.fromJson(<String, Object?>{
+        'applicationId': applicationId,
+        'conversationId': conversationId,
+        'data': data,
+        'environmentId': environmentId,
+        'eventId': eventId,
+        'eventSequence': eventSequence,
+        'occurredAt': occurredAt,
+        'schemaVersion': schemaVersion,
+        'tenantId': tenantId,
+        'type': type$,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  Uuid get applicationId => json['applicationId']! as String;
+
+  Uuid get conversationId => json['conversationId']! as String;
+
+  /// camelCase payload; message events carry the message's CURRENT representation (a deleted message replays as a tombstone).
+  Map<String, Object?> get data => json['data']! as Map<String, Object?>;
+
+  Uuid get environmentId => json['environmentId']! as String;
+
+  String get eventId => json['eventId']! as String;
+
+  int get eventSequence => (json['eventSequence']! as num).toInt();
+
+  String get occurredAt => json['occurredAt']! as String;
+
+  int get schemaVersion => (json['schemaVersion']! as num).toInt();
+
+  Uuid get tenantId => json['tenantId']! as String;
+
+  String get type$ => json['type']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
 /// Section 13 (MSG-007): the inbox summary of a conversation for the acting member, present in GET /v1/conversations answers that have an acting principal. Left conversations are not listed (only ACTIVE memberships are); a tombstoned last message carries its lifecycle and no content.
 class ConversationInbox {
   /// Wraps a decoded JSON object (unknown fields are kept).
@@ -1674,248 +1721,30 @@ class ErrorModel {
   Map<String, Object?> toJson() => json;
 }
 
-/// An event (a single occurrence or a recurring series) as the caller sees it.
-class Event {
-  /// Wraps a decoded JSON object (unknown fields are kept).
-  const Event.fromJson(this.json);
-
-  /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory Event.create({required bool allDay, required bool canDelete, required bool canEdit, String? cancelReason, String? cancelledAt, List<Uuid>? coOrganizerPrincipalIds, Uuid? communityId, Uuid? conversationId, required EventCounts counts, Uuid? coverMediaId, required String createdAt, String? description, required String endsAt, required Uuid eventId, String? location, String? meetingId, String? meetingUrl, List<int>? myReminders, String? myResponse, String? myRole, EventOccurrence? nextOccurrence, required Uuid organizerPrincipalId, EventRecurrence? recurrence, String? rrule, required String scope, String? seriesEndsAt, required String startsAt, required String state, required String timeZone, required String title, required String type$, List<EventOccurrence>? upcomingOccurrences, required String updatedAt, required int version}) =>
-      Event.fromJson(<String, Object?>{
-        'allDay': allDay,
-        'canDelete': canDelete,
-        'canEdit': canEdit,
-        if (cancelReason != null) 'cancelReason': cancelReason,
-        if (cancelledAt != null) 'cancelledAt': cancelledAt,
-        if (coOrganizerPrincipalIds != null) 'coOrganizerPrincipalIds': coOrganizerPrincipalIds,
-        if (communityId != null) 'communityId': communityId,
-        if (conversationId != null) 'conversationId': conversationId,
-        'counts': counts.toJson(),
-        if (coverMediaId != null) 'coverMediaId': coverMediaId,
-        'createdAt': createdAt,
-        if (description != null) 'description': description,
-        'endsAt': endsAt,
-        'eventId': eventId,
-        if (location != null) 'location': location,
-        if (meetingId != null) 'meetingId': meetingId,
-        if (meetingUrl != null) 'meetingUrl': meetingUrl,
-        if (myReminders != null) 'myReminders': myReminders,
-        if (myResponse != null) 'myResponse': myResponse,
-        if (myRole != null) 'myRole': myRole,
-        if (nextOccurrence != null) 'nextOccurrence': nextOccurrence.toJson(),
-        'organizerPrincipalId': organizerPrincipalId,
-        if (recurrence != null) 'recurrence': recurrence.toJson(),
-        if (rrule != null) 'rrule': rrule,
-        'scope': scope,
-        if (seriesEndsAt != null) 'seriesEndsAt': seriesEndsAt,
-        'startsAt': startsAt,
-        'state': state,
-        'timeZone': timeZone,
-        'title': title,
-        'type': type$,
-        if (upcomingOccurrences != null) 'upcomingOccurrences': upcomingOccurrences.map((e) => e.toJson()).toList(),
-        'updatedAt': updatedAt,
-        'version': version,
-      });
-
-  /// The JSON object, including fields this SDK version does not know.
-  final Map<String, Object?> json;
-
-  bool get allDay => json['allDay']! as bool;
-
-  bool get canDelete => json['canDelete']! as bool;
-
-  bool get canEdit => json['canEdit']! as bool;
-
-  String? get cancelReason => json['cancelReason'] as String?;
-
-  String? get cancelledAt => json['cancelledAt'] as String?;
-
-  List<Uuid>? get coOrganizerPrincipalIds => json['coOrganizerPrincipalIds'] == null ? null : (json['coOrganizerPrincipalIds']! as List<Object?>).map((e) => e! as String).toList();
-
-  /// 1.43.0: the community of a COMMUNITY event.
-  Uuid? get communityId => json['communityId'] as String?;
-
-  Uuid? get conversationId => json['conversationId'] as String?;
-
-  EventCounts get counts => EventCounts.fromJson(json['counts']! as Map<String, Object?>);
-
-  Uuid? get coverMediaId => json['coverMediaId'] as String?;
-
-  String get createdAt => json['createdAt']! as String;
-
-  String? get description => json['description'] as String?;
-
-  String get endsAt => json['endsAt']! as String;
-
-  Uuid get eventId => json['eventId']! as String;
-
-  String? get location => json['location'] as String?;
-
-  String? get meetingId => json['meetingId'] as String?;
-
-  String? get meetingUrl => json['meetingUrl'] as String?;
-
-  List<int>? get myReminders => json['myReminders'] == null ? null : (json['myReminders']! as List<Object?>).map((e) => (e! as num).toInt()).toList();
-
-  String? get myResponse => json['myResponse'] as String?;
-
-  String? get myRole => json['myRole'] as String?;
-
-  EventOccurrence? get nextOccurrence => json['nextOccurrence'] == null ? null : EventOccurrence.fromJson(json['nextOccurrence']! as Map<String, Object?>);
-
-  Uuid get organizerPrincipalId => json['organizerPrincipalId']! as String;
-
-  EventRecurrence? get recurrence => json['recurrence'] == null ? null : EventRecurrence.fromJson(json['recurrence']! as Map<String, Object?>);
-
-  String? get rrule => json['rrule'] as String?;
-
-  /// PERSONAL, CONVERSATION (with conversationId) or COMMUNITY (with communityId; 1.43.0: created by the community's owner and admins, seen by its ACTIVE members). ORGANIZATION is reserved: 422 CONTEXT_NOT_ALLOWED / EVENT_SCOPE_NOT_AVAILABLE.
-  String get scope => json['scope']! as String;
-
-  String? get seriesEndsAt => json['seriesEndsAt'] as String?;
-
-  String get startsAt => json['startsAt']! as String;
-
-  String get state => json['state']! as String;
-
-  String get timeZone => json['timeZone']! as String;
-
-  String get title => json['title']! as String;
-
-  /// ONLINE needs meetingId or meetingUrl (a CF Meet meeting the client picked or created).
-  String get type$ => json['type']! as String;
-
-  /// getEvent only: at most 10.
-  List<EventOccurrence>? get upcomingOccurrences => json['upcomingOccurrences'] == null ? null : (json['upcomingOccurrences']! as List<Object?>).map((e) => EventOccurrence.fromJson(e! as Map<String, Object?>)).toList();
-
-  String get updatedAt => json['updatedAt']! as String;
-
-  int get version => (json['version']! as num).toInt();
-
-  Map<String, Object?> toJson() => json;
-}
-
-class EventCounts {
-  /// Wraps a decoded JSON object (unknown fields are kept).
-  const EventCounts.fromJson(this.json);
-
-  /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory EventCounts.create({required int awaiting, required int going, required int maybe, required int notGoing}) =>
-      EventCounts.fromJson(<String, Object?>{
-        'awaiting': awaiting,
-        'going': going,
-        'maybe': maybe,
-        'notGoing': notGoing,
-      });
-
-  /// The JSON object, including fields this SDK version does not know.
-  final Map<String, Object?> json;
-
-  int get awaiting => (json['awaiting']! as num).toInt();
-
-  int get going => (json['going']! as num).toInt();
-
-  int get maybe => (json['maybe']! as num).toInt();
-
-  int get notGoing => (json['notGoing']! as num).toInt();
-
-  Map<String, Object?> toJson() => json;
-}
-
-class EventOccurrence {
-  /// Wraps a decoded JSON object (unknown fields are kept).
-  const EventOccurrence.fromJson(this.json);
-
-  /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory EventOccurrence.create({required String endsAt, required String startsAt}) =>
-      EventOccurrence.fromJson(<String, Object?>{
-        'endsAt': endsAt,
-        'startsAt': startsAt,
-      });
-
-  /// The JSON object, including fields this SDK version does not know.
-  final Map<String, Object?> json;
-
-  String get endsAt => json['endsAt']! as String;
-
-  String get startsAt => json['startsAt']! as String;
-
-  Map<String, Object?> toJson() => json;
-}
-
 class EventPage {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const EventPage.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory EventPage.create({required List<EventPageItem> items, required String? nextCursor}) =>
+  factory EventPage.create({required List<ConversationEvent> events, required bool hasMore, required int? nextAfter, required bool syncRequired}) =>
       EventPage.fromJson(<String, Object?>{
-        'items': items.map((e) => e.toJson()).toList(),
-        'nextCursor': nextCursor,
+        'events': events.map((e) => e.toJson()).toList(),
+        'hasMore': hasMore,
+        'nextAfter': nextAfter,
+        'syncRequired': syncRequired,
       });
 
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
 
-  List<EventPageItem> get items => (json['items']! as List<Object?>).map((e) => EventPageItem.fromJson(e! as Map<String, Object?>)).toList();
+  List<ConversationEvent> get events => (json['events']! as List<Object?>).map((e) => ConversationEvent.fromJson(e! as Map<String, Object?>)).toList();
 
-  String? get nextCursor => json['nextCursor'] as String?;
+  bool get hasMore => json['hasMore']! as bool;
 
-  Map<String, Object?> toJson() => json;
-}
+  int? get nextAfter => (json['nextAfter'] as num?)?.toInt();
 
-class EventPageItem {
-  /// Wraps a decoded JSON object (unknown fields are kept).
-  const EventPageItem.fromJson(this.json);
-
-  /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory EventPageItem.create({required String endsAt, required Event event, required String startsAt}) =>
-      EventPageItem.fromJson(<String, Object?>{
-        'endsAt': endsAt,
-        'event': event.toJson(),
-        'startsAt': startsAt,
-      });
-
-  /// The JSON object, including fields this SDK version does not know.
-  final Map<String, Object?> json;
-
-  String get endsAt => json['endsAt']! as String;
-
-  Event get event => Event.fromJson(json['event']! as Map<String, Object?>);
-
-  String get startsAt => json['startsAt']! as String;
-
-  Map<String, Object?> toJson() => json;
-}
-
-/// RRULE subset expanded server-side in the event time zone: FREQ, INTERVAL, COUNT or UNTIL (a local date, inclusive, at most 5 years after the start), BYDAY (WEEKLY only; the start must fall on one of the days).
-class EventRecurrence {
-  /// Wraps a decoded JSON object (unknown fields are kept).
-  const EventRecurrence.fromJson(this.json);
-
-  /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory EventRecurrence.create({List<String>? byDay, int? count, required String frequency, int? interval, String? until}) =>
-      EventRecurrence.fromJson(<String, Object?>{
-        if (byDay != null) 'byDay': byDay,
-        if (count != null) 'count': count,
-        'frequency': frequency,
-        if (interval != null) 'interval': interval,
-        if (until != null) 'until': until,
-      });
-
-  /// The JSON object, including fields this SDK version does not know.
-  final Map<String, Object?> json;
-
-  List<String>? get byDay => json['byDay'] == null ? null : (json['byDay']! as List<Object?>).map((e) => e! as String).toList();
-
-  int? get count => (json['count'] as num?)?.toInt();
-
-  String get frequency => json['frequency']! as String;
-
-  int? get interval => (json['interval'] as num?)?.toInt();
-
-  String? get until => json['until'] as String?;
+  /// The requested position is older than the retained event window: resynchronize messages by sequence.
+  bool get syncRequired => json['syncRequired']! as bool;
 
   Map<String, Object?> toJson() => json;
 }

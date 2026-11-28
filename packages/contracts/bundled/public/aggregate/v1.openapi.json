@@ -72010,6 +72010,61 @@
           }
         ]
       },
+      "messaging.messaging.common.v1.ConversationEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "pattern": "^evt_[0-9a-f]{32}$"
+          },
+          "type": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9.-]{2,79}$"
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "conversationId": {
+            "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+          },
+          "eventSequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "data": {
+            "type": "object",
+            "description": "camelCase payload; message events carry the message's CURRENT representation (a deleted message replays as a tombstone)."
+          },
+          "tenantId": {
+            "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+          },
+          "applicationId": {
+            "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+          },
+          "environmentId": {
+            "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+          }
+        },
+        "required": [
+          "eventId",
+          "type",
+          "schemaVersion",
+          "conversationId",
+          "eventSequence",
+          "occurredAt",
+          "data",
+          "tenantId",
+          "applicationId",
+          "environmentId"
+        ],
+        "description": "A durable conversation event (derived from committed state, replayable by its per-conversation eventSequence). Every durable event names its tenant, application and environment (§117)."
+      },
       "messaging.messaging.common.v1.ConversationInbox": {
         "type": "object",
         "additionalProperties": false,
@@ -73233,424 +73288,39 @@
           "STORAGE_UNAVAILABLE"
         ]
       },
-      "messaging.messaging.common.v1.Event": {
-        "type": "object",
-        "additionalProperties": true,
-        "description": "An event (a single occurrence or a recurring series) as the caller sees it.",
-        "properties": {
-          "eventId": {
-            "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
-          },
-          "scope": {
-            "type": "string",
-            "enum": [
-              "PERSONAL",
-              "CONVERSATION",
-              "ORGANIZATION",
-              "COMMUNITY"
-            ],
-            "description": "PERSONAL, CONVERSATION (with conversationId) or COMMUNITY (with communityId; 1.43.0: created by the community's owner and admins, seen by its ACTIVE members). ORGANIZATION is reserved: 422 CONTEXT_NOT_ALLOWED / EVENT_SCOPE_NOT_AVAILABLE."
-          },
-          "conversationId": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "communityId": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "1.43.0: the community of a COMMUNITY event."
-          },
-          "title": {
-            "type": "string"
-          },
-          "description": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "location": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "ONLINE",
-              "PHYSICAL",
-              "CALL"
-            ],
-            "description": "ONLINE needs meetingId or meetingUrl (a CF Meet meeting the client picked or created)."
-          },
-          "meetingId": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "meetingUrl": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "coverMediaId": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "startsAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "endsAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "timeZone": {
-            "type": "string"
-          },
-          "allDay": {
-            "type": "boolean"
-          },
-          "recurrence": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/messaging.messaging.common.v1.EventRecurrence"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "rrule": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "seriesEndsAt": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "ACTIVE",
-              "CANCELLED"
-            ]
-          },
-          "cancelledAt": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "cancelReason": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "organizerPrincipalId": {
-            "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
-          },
-          "coOrganizerPrincipalIds": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
-            }
-          },
-          "myRole": {
-            "oneOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "ORGANIZER",
-                  "CO_ORGANIZER",
-                  "INVITEE",
-                  "MEMBER"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "myResponse": {
-            "oneOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "GOING",
-                  "MAYBE",
-                  "NOT_GOING"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "myReminders": {
-            "type": "array",
-            "items": {
-              "type": "integer"
-            }
-          },
-          "counts": {
-            "$ref": "#/components/schemas/messaging.messaging.common.v1.EventCounts"
-          },
-          "canEdit": {
-            "type": "boolean"
-          },
-          "canDelete": {
-            "type": "boolean"
-          },
-          "version": {
-            "type": "integer"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "nextOccurrence": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/messaging.messaging.common.v1.EventOccurrence"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "upcomingOccurrences": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/messaging.messaging.common.v1.EventOccurrence"
-            },
-            "description": "getEvent only: at most 10."
-          }
-        },
-        "required": [
-          "eventId",
-          "scope",
-          "title",
-          "type",
-          "startsAt",
-          "endsAt",
-          "timeZone",
-          "allDay",
-          "state",
-          "organizerPrincipalId",
-          "counts",
-          "canEdit",
-          "canDelete",
-          "version",
-          "createdAt",
-          "updatedAt"
-        ]
-      },
-      "messaging.messaging.common.v1.EventCounts": {
-        "type": "object",
-        "additionalProperties": true,
-        "properties": {
-          "going": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "maybe": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "notGoing": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "awaiting": {
-            "type": "integer",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "going",
-          "maybe",
-          "notGoing",
-          "awaiting"
-        ]
-      },
-      "messaging.messaging.common.v1.EventOccurrence": {
-        "type": "object",
-        "additionalProperties": true,
-        "properties": {
-          "startsAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "endsAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "startsAt",
-          "endsAt"
-        ]
-      },
       "messaging.messaging.common.v1.EventPage": {
         "type": "object",
-        "additionalProperties": true,
+        "additionalProperties": false,
         "properties": {
-          "items": {
+          "events": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/messaging.messaging.common.v1.EventPageItem"
+              "$ref": "#/components/schemas/messaging.messaging.common.v1.ConversationEvent"
             }
           },
-          "nextCursor": {
+          "nextAfter": {
             "oneOf": [
               {
-                "type": "string"
+                "type": "integer"
               },
               {
                 "type": "null"
               }
             ]
+          },
+          "hasMore": {
+            "type": "boolean"
+          },
+          "syncRequired": {
+            "type": "boolean",
+            "description": "The requested position is older than the retained event window: resynchronize messages by sequence."
           }
         },
         "required": [
-          "items",
-          "nextCursor"
-        ]
-      },
-      "messaging.messaging.common.v1.EventPageItem": {
-        "type": "object",
-        "additionalProperties": true,
-        "properties": {
-          "startsAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "endsAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "event": {
-            "$ref": "#/components/schemas/messaging.messaging.common.v1.Event"
-          }
-        },
-        "required": [
-          "startsAt",
-          "endsAt",
-          "event"
-        ]
-      },
-      "messaging.messaging.common.v1.EventRecurrence": {
-        "type": "object",
-        "additionalProperties": false,
-        "description": "RRULE subset expanded server-side in the event time zone: FREQ, INTERVAL, COUNT or UNTIL (a local date, inclusive, at most 5 years after the start), BYDAY (WEEKLY only; the start must fall on one of the days).",
-        "properties": {
-          "frequency": {
-            "type": "string",
-            "enum": [
-              "DAILY",
-              "WEEKLY",
-              "MONTHLY"
-            ]
-          },
-          "interval": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 99
-          },
-          "count": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 730
-          },
-          "until": {
-            "type": "string",
-            "format": "date"
-          },
-          "byDay": {
-            "type": "array",
-            "maxItems": 7,
-            "uniqueItems": true,
-            "items": {
-              "type": "string",
-              "enum": [
-                "MO",
-                "TU",
-                "WE",
-                "TH",
-                "FR",
-                "SA",
-                "SU"
-              ]
-            }
-          }
-        },
-        "required": [
-          "frequency"
+          "events",
+          "nextAfter",
+          "hasMore",
+          "syncRequired"
         ]
       },
       "messaging.messaging.common.v1.Export": {

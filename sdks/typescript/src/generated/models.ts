@@ -6955,6 +6955,20 @@ export namespace Messaging {
     /** 1.36.0: a MANAGED group's description (always null for DIRECT and PRIVATE_E2EE conversations, whose metadata belongs inside the MLS group). */
     description?: string | null;
   };
+  /** A durable conversation event (derived from committed state, replayable by its per-conversation eventSequence). Every durable event names its tenant, application and environment (§117). */
+  export type ConversationEvent = {
+    eventId: string;
+    type: string;
+    schemaVersion: number;
+    conversationId: Uuid;
+    eventSequence: number;
+    occurredAt: string;
+    /** camelCase payload; message events carry the message's CURRENT representation (a deleted message replays as a tombstone). */
+    data: { [key: string]: unknown };
+    tenantId: Uuid;
+    applicationId: Uuid;
+    environmentId: Uuid;
+  };
   /** Section 13 (MSG-007): the inbox summary of a conversation for the acting member, present in GET /v1/conversations answers that have an acting principal. Left conversations are not listed (only ACTIVE memberships are); a tombstoned last message carries its lifecycle and no content. */
   export type ConversationInbox = {
     /** The latest application message (or the creation time); the key of orderBy=lastActivity. */
@@ -7209,73 +7223,12 @@ export namespace Messaging {
     };
   };
   export type ErrorCode = "VALIDATION_ERROR" | "AUTHENTICATION_FAILED" | "CLIENT_TOKENS_NOT_ENABLED" | "AUTHORITY_SUSPENDED" | "INSUFFICIENT_SCOPE" | "ACTING_PRINCIPAL_REQUIRED" | "PRINCIPAL_NOT_AUTHORIZED" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "PAYLOAD_TOO_LARGE" | "RATE_LIMITED" | "INTERNAL_AUTHENTICATION_FAILED" | "INTERNAL_PERMISSION_DENIED" | "DELEGATED_CONTEXT_REQUIRED" | "DELEGATED_CONTEXT_INVALID" | "AUTHORIZATION_REVOKED" | "FEATURE_DISABLED" | "CHALLENGE_INVALID" | "KEY_PACKAGE_REJECTED" | "DEVICE_REVOKED" | "DEVICE_LIMIT_REACHED" | "KEY_PACKAGE_LIMIT_REACHED" | "IDEMPOTENCY_KEY_REQUIRED" | "IDEMPOTENCY_KEY_REUSED" | "CONTEXT_NOT_ALLOWED" | "SECURITY_PROFILE_NOT_ALLOWED" | "SECURITY_PROFILE_IMMUTABLE" | "E2EE_NOT_AVAILABLE" | "VERSION_CONFLICT" | "INVALID_TRANSITION" | "CONVERSATION_NOT_ACTIVE" | "POLICY_VERSION_CONFLICT" | "CONFLICT" | "SERVICE_UNAVAILABLE" | "INTERNAL_ERROR" | "EPOCH_MISMATCH" | "MLS_REKEY_REQUIRED" | "SEND_RESTRICTED" | "DELIVERY_REFUSED" | "CONTENT_REJECTED" | "MESSAGE_NOT_MODIFIABLE" | "QUOTA_EXCEEDED" | "ATTACHMENT_NOT_READY" | "INTEGRITY_CHECK_FAILED" | "LOCAL_SEARCH_ONLY" | "E2EE_EXPORT_NOT_AVAILABLE" | "LEGAL_HOLD_ACTIVE" | "STORAGE_UNAVAILABLE";
-  /** An event (a single occurrence or a recurring series) as the caller sees it. */
-  export type Event = {
-    eventId: Uuid;
-    /** PERSONAL, CONVERSATION (with conversationId) or COMMUNITY (with communityId; 1.43.0: created by the community's owner and admins, seen by its ACTIVE members). ORGANIZATION is reserved: 422 CONTEXT_NOT_ALLOWED / EVENT_SCOPE_NOT_AVAILABLE. */
-    scope: "PERSONAL" | "CONVERSATION" | "ORGANIZATION" | "COMMUNITY";
-    conversationId?: Uuid | null;
-    /** 1.43.0: the community of a COMMUNITY event. */
-    communityId?: Uuid | null;
-    title: string;
-    description?: string | null;
-    location?: string | null;
-    /** ONLINE needs meetingId or meetingUrl (a CF Meet meeting the client picked or created). */
-    type: "ONLINE" | "PHYSICAL" | "CALL";
-    meetingId?: string | null;
-    meetingUrl?: string | null;
-    coverMediaId?: Uuid | null;
-    startsAt: string;
-    endsAt: string;
-    timeZone: string;
-    allDay: boolean;
-    recurrence?: EventRecurrence | null;
-    rrule?: string | null;
-    seriesEndsAt?: string | null;
-    state: "ACTIVE" | "CANCELLED";
-    cancelledAt?: string | null;
-    cancelReason?: string | null;
-    organizerPrincipalId: Uuid;
-    coOrganizerPrincipalIds?: Array<Uuid>;
-    myRole?: ("ORGANIZER" | "CO_ORGANIZER" | "INVITEE" | "MEMBER") | null;
-    myResponse?: ("GOING" | "MAYBE" | "NOT_GOING") | null;
-    myReminders?: Array<number>;
-    counts: EventCounts;
-    canEdit: boolean;
-    canDelete: boolean;
-    version: number;
-    createdAt: string;
-    updatedAt: string;
-    nextOccurrence?: EventOccurrence | null;
-    /** getEvent only: at most 10. */
-    upcomingOccurrences?: Array<EventOccurrence>;
-  };
-  export type EventCounts = {
-    going: number;
-    maybe: number;
-    notGoing: number;
-    awaiting: number;
-  };
-  export type EventOccurrence = {
-    startsAt: string;
-    endsAt: string;
-  };
   export type EventPage = {
-    items: Array<EventPageItem>;
-    nextCursor: string | null;
-  };
-  export type EventPageItem = {
-    startsAt: string;
-    endsAt: string;
-    event: Event;
-  };
-  /** RRULE subset expanded server-side in the event time zone: FREQ, INTERVAL, COUNT or UNTIL (a local date, inclusive, at most 5 years after the start), BYDAY (WEEKLY only; the start must fall on one of the days). */
-  export type EventRecurrence = {
-    frequency: "DAILY" | "WEEKLY" | "MONTHLY";
-    interval?: number;
-    count?: number;
-    until?: string;
-    byDay?: Array<"MO" | "TU" | "WE" | "TH" | "FR" | "SA" | "SU">;
+    events: Array<ConversationEvent>;
+    nextAfter: number | null;
+    hasMore: boolean;
+    /** The requested position is older than the retained event window: resynchronize messages by sequence. */
+    syncRequired: boolean;
   };
   /** A MANAGED-only export (PRIVATE_E2EE: E2EE_EXPORT_NOT_AVAILABLE). */
   export type Export = {

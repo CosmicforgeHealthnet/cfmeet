@@ -18516,7 +18516,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/EventPage"
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/CalendarEventPage"
                 }
               }
             }
