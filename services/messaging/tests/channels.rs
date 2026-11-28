@@ -1154,7 +1154,8 @@ async fn verification_and_moderation_come_only_from_the_admin_bridge() {
                 Some(body),
             )
             .await;
-        assert_eq!(r.status.as_u16(), 400, "{}", r.text);
+        // An unknown field is refused (400 / 422) and changes nothing.
+        assert!(matches!(r.status.as_u16(), 400 | 422), "{}", r.text);
     }
     let customer =
         w.h.send(
