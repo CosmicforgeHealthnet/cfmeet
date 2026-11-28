@@ -1435,6 +1435,39 @@ pub async fn mine(state: &AppState, ctx: &TrustedContext, acting: &Acting) -> Re
     Ok(json!({ "readReceipts": receipts, "posts": posts }))
 }
 
+// ---------------------------------------------------------------------------- update
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateStatus {
+    pub allow_sharing: bool,
+}
+
+/// The author changes "Allow sharing" of one live status of theirs (forwards and reshares
+/// check it at the time they happen; earlier forwards and reshares are not undone, a
+/// reshare's readers still pass the original's gate). Anyone else: `404`.
+pub async fn update(
+    state: &AppState,
+    ctx: &TrustedContext,
+    acting: &Acting,
+    id: Uuid,
+    req: UpdateStatus,
+) -> Result<Value> {
+    let env = ctx.scope.environment_id;
+    let row = load(&state.db, env, id)
+        .await?
+        .filter(|r| r.author_principal_id == acting.principal_id && r.expires_at > state.now())
+        .ok_or_else(not_found)?;
+    db::exec(
+        &state.db,
+        "UPDATE messaging_statuses SET allow_sharing = $3 WHERE id = $1 AND environment_id = $2",
+        vec![row.id.into(), env.into(), req.allow_sharing.into()],
+    )
+    .await?;
+    let row = load(&state.db, env, id).await?.ok_or_else(not_found)?;
+    render_one(state, acting.principal_id, &row).await
+}
+
 // ---------------------------------------------------------------------------- delete
 
 /// Deletes the caller's statuses (and reshares of them), then their media nothing else uses.
