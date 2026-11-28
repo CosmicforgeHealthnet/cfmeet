@@ -1,12 +1,13 @@
-//! The closed event catalogue (Document 4 §5.2): 47 inbound types (30 core, the optional
+//! The closed event catalogue (Document 4 §5.2): 50 inbound types (30 core, the optional
 //! `operator.alert.fired` approved under D-15, since contract 1.2.0 the three
 //! passwordless account codes #32–#34 of PR #97, since 1.3.0 the four account notices
 //! #35–#38: welcome, new sign-in, email-in-use and email-changed, since 1.4.0 the
 //! organization lifecycle notices #39–#40: archived and reactivated, and since 1.6.0 the
 //! Developer Platform's first-party workspace owner invitation #41, since 1.7.0 the
 //! organization export notice #42, since 1.8.0 the Messaging event notices #43–#45:
-//! invited, cancelled and reminder, and since 1.9.0 the Messaging status notices #46–#47:
-//! mentioned and shared) and the control event
+//! invited, cancelled and reminder, since 1.9.0 the Messaging status notices #46–#47:
+//! mentioned and shared, and since 1.10.0 the Messaging community notices #48–#50: invited,
+//! join requested and request approved) and the control event
 //! `notifications.cancel`. It mirrors `x-cfmeet-catalogue` in the contract
 //! `packages/contracts/notifications/events/v1.schema.json`; `tests/contract.rs` fails if
 //! the two ever differ.
@@ -433,8 +434,9 @@ const CONFERENCE: &[&str] = &["conferenceId", "startsAt"];
 const CREDENTIAL: &[&str] = &["applicationId", "credentialId", "expiresAt"];
 const MESSAGING_EVENT: &[&str] = &["eventId"];
 const MESSAGING_STATUS: &[&str] = &["statusId"];
+const MESSAGING_COMMUNITY: &[&str] = &["communityId"];
 
-/// The catalogue, in contract order (#1–#47, then the control event).
+/// The catalogue, in contract order (#1–#50, then the control event).
 pub const CATALOGUE: &[EventSpec] = &[
     EventSpec {
         optional_data: &["role"],
@@ -1018,6 +1020,46 @@ pub const CATALOGUE: &[EventSpec] = &[
             "DIRECT_MESSAGES",
             "STATUS",
             MESSAGING_STATUS,
+        )
+    },
+    // ADR 0073 (contract 1.10.0): Communities in Messaging. One notice per CF Meet account
+    // (exactly one cfmeet-user recipient), ids only, nothing sealed; the COMMUNITY subject is
+    // the community. Invitations go to the invitee, join requests to each admin who can
+    // decide them, approvals to the requester; all follow the group-invitation preference.
+    EventSpec {
+        recipient: Some(RecipientKind::Account),
+        ..e(
+            48,
+            "messaging.community.invited",
+            MSG,
+            Normal,
+            "GROUP_INVITATIONS",
+            "COMMUNITY",
+            MESSAGING_COMMUNITY,
+        )
+    },
+    EventSpec {
+        recipient: Some(RecipientKind::Account),
+        ..e(
+            49,
+            "messaging.community.join_requested",
+            MSG,
+            Normal,
+            "GROUP_INVITATIONS",
+            "COMMUNITY",
+            MESSAGING_COMMUNITY,
+        )
+    },
+    EventSpec {
+        recipient: Some(RecipientKind::Account),
+        ..e(
+            50,
+            "messaging.community.request_approved",
+            MSG,
+            Normal,
+            "GROUP_INVITATIONS",
+            "COMMUNITY",
+            MESSAGING_COMMUNITY,
         )
     },
     EventSpec {

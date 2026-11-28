@@ -368,6 +368,18 @@ pub fn inbox_text(template: &str, params: &Value) -> (String, String) {
             "Someone mentioned you in their status.".into(),
         ),
         "status.shared" => ("Status shared", "Someone shared your status.".into()),
+        "community.invited" => (
+            "Community invitation",
+            "You're invited to join a community.".into(),
+        ),
+        "community.join_requested" => (
+            "Request to join",
+            "Someone asked to join your community.".into(),
+        ),
+        "community.request_approved" => (
+            "Request approved",
+            "Your request to join a community was approved.".into(),
+        ),
         "call.missed" => ("Missed call", "You missed a call.".into()),
         "call.voicemail" => ("New voicemail", "You have a new voice message.".into()),
         "call.recording" => ("Recording ready", "A call recording is ready.".into()),

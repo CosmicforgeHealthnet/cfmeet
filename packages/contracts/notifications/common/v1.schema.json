@@ -128,9 +128,12 @@
         "messaging.event.invited",
         "messaging.event.cancelled",
         "messaging.event.reminder",
-        "notifications.cancel",
         "messaging.status.mentioned",
-        "messaging.status.shared"
+        "messaging.status.shared",
+        "messaging.community.invited",
+        "messaging.community.join_requested",
+        "messaging.community.request_approved",
+        "notifications.cancel"
       ]
     },
     "StepUpPurpose": {
@@ -279,8 +282,9 @@
         "OPEN_SECURITY_SETTINGS",
         "OPEN_DEVELOPER_APPLICATION",
         "OPEN_EVENT",
-        "NONE",
-        "OPEN_STATUS"
+        "OPEN_STATUS",
+        "OPEN_COMMUNITY",
+        "NONE"
       ],
       "description": "Closed set: clients map each kind to a fixed in-app destination. No URL is ever returned."
     },
