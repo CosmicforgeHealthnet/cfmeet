@@ -26,7 +26,7 @@
     },
     {
       "name": "messaging",
-      "description": "cfmeet.messaging.http-api 1.28.0"
+      "description": "cfmeet.messaging.http-api 1.31.0"
     },
     {
       "name": "numbering",
@@ -73249,7 +73249,7 @@
               "ORGANIZATION",
               "COMMUNITY"
             ],
-            "description": "ORGANIZATION and COMMUNITY are reserved: 422 CONTEXT_NOT_ALLOWED / EVENT_SCOPE_NOT_AVAILABLE."
+            "description": "PERSONAL, CONVERSATION (with conversationId) or COMMUNITY (with communityId; 1.43.0: created by the community's owner and admins, seen by its ACTIVE members). ORGANIZATION is reserved: 422 CONTEXT_NOT_ALLOWED / EVENT_SCOPE_NOT_AVAILABLE."
           },
           "conversationId": {
             "oneOf": [
@@ -73260,6 +73260,17 @@
                 "type": "null"
               }
             ]
+          },
+          "communityId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1.43.0: the community of a COMMUNITY event."
           },
           "title": {
             "type": "string"

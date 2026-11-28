@@ -7212,9 +7212,11 @@ export namespace Messaging {
   /** An event (a single occurrence or a recurring series) as the caller sees it. */
   export type Event = {
     eventId: Uuid;
-    /** ORGANIZATION and COMMUNITY are reserved: 422 CONTEXT_NOT_ALLOWED / EVENT_SCOPE_NOT_AVAILABLE. */
+    /** PERSONAL, CONVERSATION (with conversationId) or COMMUNITY (with communityId; 1.43.0: created by the community's owner and admins, seen by its ACTIVE members). ORGANIZATION is reserved: 422 CONTEXT_NOT_ALLOWED / EVENT_SCOPE_NOT_AVAILABLE. */
     scope: "PERSONAL" | "CONVERSATION" | "ORGANIZATION" | "COMMUNITY";
     conversationId?: Uuid | null;
+    /** 1.43.0: the community of a COMMUNITY event. */
+    communityId?: Uuid | null;
     title: string;
     description?: string | null;
     location?: string | null;

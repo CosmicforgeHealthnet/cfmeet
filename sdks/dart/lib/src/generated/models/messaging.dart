@@ -1680,7 +1680,7 @@ class Event {
   const Event.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory Event.create({required bool allDay, required bool canDelete, required bool canEdit, String? cancelReason, String? cancelledAt, List<Uuid>? coOrganizerPrincipalIds, Uuid? conversationId, required EventCounts counts, Uuid? coverMediaId, required String createdAt, String? description, required String endsAt, required Uuid eventId, String? location, String? meetingId, String? meetingUrl, List<int>? myReminders, String? myResponse, String? myRole, EventOccurrence? nextOccurrence, required Uuid organizerPrincipalId, EventRecurrence? recurrence, String? rrule, required String scope, String? seriesEndsAt, required String startsAt, required String state, required String timeZone, required String title, required String type$, List<EventOccurrence>? upcomingOccurrences, required String updatedAt, required int version}) =>
+  factory Event.create({required bool allDay, required bool canDelete, required bool canEdit, String? cancelReason, String? cancelledAt, List<Uuid>? coOrganizerPrincipalIds, Uuid? communityId, Uuid? conversationId, required EventCounts counts, Uuid? coverMediaId, required String createdAt, String? description, required String endsAt, required Uuid eventId, String? location, String? meetingId, String? meetingUrl, List<int>? myReminders, String? myResponse, String? myRole, EventOccurrence? nextOccurrence, required Uuid organizerPrincipalId, EventRecurrence? recurrence, String? rrule, required String scope, String? seriesEndsAt, required String startsAt, required String state, required String timeZone, required String title, required String type$, List<EventOccurrence>? upcomingOccurrences, required String updatedAt, required int version}) =>
       Event.fromJson(<String, Object?>{
         'allDay': allDay,
         'canDelete': canDelete,
@@ -1688,6 +1688,7 @@ class Event {
         if (cancelReason != null) 'cancelReason': cancelReason,
         if (cancelledAt != null) 'cancelledAt': cancelledAt,
         if (coOrganizerPrincipalIds != null) 'coOrganizerPrincipalIds': coOrganizerPrincipalIds,
+        if (communityId != null) 'communityId': communityId,
         if (conversationId != null) 'conversationId': conversationId,
         'counts': counts.toJson(),
         if (coverMediaId != null) 'coverMediaId': coverMediaId,
@@ -1732,6 +1733,9 @@ class Event {
 
   List<Uuid>? get coOrganizerPrincipalIds => json['coOrganizerPrincipalIds'] == null ? null : (json['coOrganizerPrincipalIds']! as List<Object?>).map((e) => e! as String).toList();
 
+  /// 1.43.0: the community of a COMMUNITY event.
+  Uuid? get communityId => json['communityId'] as String?;
+
   Uuid? get conversationId => json['conversationId'] as String?;
 
   EventCounts get counts => EventCounts.fromJson(json['counts']! as Map<String, Object?>);
@@ -1766,7 +1770,7 @@ class Event {
 
   String? get rrule => json['rrule'] as String?;
 
-  /// ORGANIZATION and COMMUNITY are reserved: 422 CONTEXT_NOT_ALLOWED / EVENT_SCOPE_NOT_AVAILABLE.
+  /// PERSONAL, CONVERSATION (with conversationId) or COMMUNITY (with communityId; 1.43.0: created by the community's owner and admins, seen by its ACTIVE members). ORGANIZATION is reserved: 422 CONTEXT_NOT_ALLOWED / EVENT_SCOPE_NOT_AVAILABLE.
   String get scope => json['scope']! as String;
 
   String? get seriesEndsAt => json['seriesEndsAt'] as String?;

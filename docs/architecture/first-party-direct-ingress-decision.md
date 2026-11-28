@@ -84,7 +84,7 @@ non-web operations (Privacy Relay contacts, media plane).
 
 <!-- BEGIN GENERATED: scripts/contracts/first_party_ingress.py -->
 
-Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 324 in total). Regenerate with `python3 scripts/contracts/first_party_ingress.py`; CI runs it with `--check`.
+Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 412 in total). Regenerate with `python3 scripts/contracts/first_party_ingress.py`; CI runs it with `--check`.
 
 | Reason code | Operations | Domains | Meaning (from `public-routes.json`) |
 |---|---:|---|---|
@@ -97,15 +97,17 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 324 
 | `FIRST_PARTY_APP_CONSENT` | 6 | meetings | The CF Meet app's own consent and connected-apps screens for CF Meet Apps (OAuth authorize context / decision, the account's and an organization's connected apps; ADR 0064): account session only, first-party direct ingress, never a partner route. |
 | `FIRST_PARTY_APP_NOTIFICATIONS` | 9 | meetings | The CF Meet app's own notification inbox, preferences and push-endpoint registration (Meeting Service relay U1-U9 to the Notification Service; Account session required, account resolved server-side). Owner-approved 2026-11-16; served on the Meeting Service ingress, not a customer API. |
 | `FIRST_PARTY_COMMUNICATIONS_HUB` | 77 | communications | The CF Meet app's own Communications Hub (contacts, CF Meet ID / QR, timeline, activity, call history): account-session only, served on the first-party direct ingress (/api/v2/communications), never a partner API. Partners use the Messaging, Calling and Meetings APIs with a platform credential. |
+| `FIRST_PARTY_COMMUNITIES` | 38 | messaging | Communities (ADR 0073) for the CF Meet apps' own signed-in users: personal and social group collections in CF Meet's personal scope, reached only through the Meeting Service relay; not offered to partner applications. |
+| `FIRST_PARTY_EVENTS` | 19 | messaging | Events (ADR 0071) for the CF Meet apps' own signed-in users: invitees are the account's mutual Communications Hub contacts or CF Meet conversation members in CF Meet's personal scope, reached only through the Meeting Service relay; not offered to partner applications. |
 | `FIRST_PARTY_IN_MEETING_APPS` | 2 | meetings | The CF Meet app's in-meeting app panel (list of installed apps with a meeting surface, short-lived app-context tokens; ADR 0065): account session or participant token, first-party direct ingress. |
 | `FIRST_PARTY_ORGANIZATIONS` | 50 | meetings | The CF Meet app's first-party business organizations (Organizations Service relay, ADR 0056): served only to the app's own signed-in users with the verified acting user; never the developer organization authority (/v1/organizations). |
 | `FIRST_PARTY_SESSION_DEVICES` | 2 | messaging | First-party relay only (Blueprint Section 13, ADR 0049 amendment A1): MANAGED-realtime session devices are issued to the CF Meet apps' own signed-in users through the Meeting Service relay, bound to their account session; customer applications register MLS devices and use client tokens. |
-| `FIRST_PARTY_STATUS_CHANNELS` | 53 | messaging | Status and Channels (ADR 0069) for the CF Meet apps' own signed-in users: audiences are the account's mutual Communications Hub contacts in CF Meet's personal scope, reached only through the Meeting Service relay; not offered to partner applications. |
+| `FIRST_PARTY_STATUS_CHANNELS` | 84 | messaging | Status and Channels (ADR 0069) for the CF Meet apps' own signed-in users: audiences are the account's mutual Communications Hub contacts in CF Meet's personal scope, reached only through the Meeting Service relay; not offered to partner applications. |
 | `LEGACY_DIRECT_INGRESS` | 43 | meetings | Legacy Meeting Service /api/v1 surface: kept on its direct ingress for existing clients, not advertised to new customers. |
 | `MEDIA_PLANE_DIRECT` | 4 | calling | Device-to-media-edge traffic with sealed media credentials; low-latency media never transits the API Gateway. |
 | `MEETING_DIRECTORY_NOT_PUBLIC_FAMILY` | 6 | meetings | Meeting-domain organization directory administration; not part of the approved public meetings family and never the developer organization authority. |
 | `NOT_AN_API_OPERATION` | 1 | meetings | Service landing response. |
-| **Total** | **324** | | |
+| **Total** | **412** | | |
 
 #### `APP_CONTEXT_KEYS_DIRECT` (1)
 
@@ -315,6 +317,73 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 324 
 | DELETE | `/api/v2/communications/saved-messages/{savedId}` | `deleteSavedMessage` | `cfmeet.communications.http-api` |
 | GET | `/api/v2/communications/sync` | `syncCommunicationsChanges` | `cfmeet.communications.http-api` |
 
+#### `FIRST_PARTY_COMMUNITIES` (38)
+
+| Method | Path | operationId | Contract |
+|---|---|---|---|
+| GET | `/v1/messaging/communities` | `listCommunities` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/communities` | `createCommunity` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/communities/invitations` | `listMyCommunityInvitations` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/communities/invitations/{invitationId}/accept` | `acceptCommunityInvitation` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/communities/invitations/{invitationId}/decline` | `declineCommunityInvitation` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/communities/invite-links/join` | `joinCommunityInviteLink` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/communities/invite-links/preview` | `previewCommunityInviteLink` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/communities/join-requests` | `listMyCommunityJoinRequests` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/communities/join-requests/{requestId}/cancel` | `cancelCommunityJoinRequest` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/communities/preferences` | `getCommunityPreferences` | `cfmeet.messaging.http-api` |
+| PUT | `/v1/messaging/communities/preferences` | `putCommunityPreferences` | `cfmeet.messaging.http-api` |
+| DELETE | `/v1/messaging/communities/{communityId}` | `deleteCommunity` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/communities/{communityId}` | `getCommunity` | `cfmeet.messaging.http-api` |
+| PATCH | `/v1/messaging/communities/{communityId}` | `updateCommunity` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/communities/{communityId}/bans` | `listCommunityBans` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/communities/{communityId}/bans` | `banCommunityMember` | `cfmeet.messaging.http-api` |
+| DELETE | `/v1/messaging/communities/{communityId}/bans/{principalId}` | `unbanCommunityMember` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/communities/{communityId}/groups` | `listCommunityGroups` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/communities/{communityId}/groups` | `createCommunityGroup` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/communities/{communityId}/groups/link` | `linkCommunityGroup` | `cfmeet.messaging.http-api` |
+| PUT | `/v1/messaging/communities/{communityId}/groups/order` | `reorderCommunityGroups` | `cfmeet.messaging.http-api` |
+| DELETE | `/v1/messaging/communities/{communityId}/groups/{conversationId}` | `unlinkCommunityGroup` | `cfmeet.messaging.http-api` |
+| PATCH | `/v1/messaging/communities/{communityId}/groups/{conversationId}` | `updateCommunityGroup` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/communities/{communityId}/groups/{conversationId}/join` | `joinCommunityGroup` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/communities/{communityId}/invitations` | `listCommunityInvitations` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/communities/{communityId}/invitations` | `inviteToCommunity` | `cfmeet.messaging.http-api` |
+| DELETE | `/v1/messaging/communities/{communityId}/invitations/{invitationId}` | `revokeCommunityInvitation` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/communities/{communityId}/invite-links` | `listCommunityInviteLinks` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/communities/{communityId}/invite-links` | `createCommunityInviteLink` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/communities/{communityId}/invite-links/{linkId}/revoke` | `revokeCommunityInviteLink` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/communities/{communityId}/join-requests` | `listCommunityJoinRequests` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/communities/{communityId}/join-requests/{requestId}/approve` | `approveCommunityJoinRequest` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/communities/{communityId}/join-requests/{requestId}/reject` | `rejectCommunityJoinRequest` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/communities/{communityId}/leave` | `leaveCommunity` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/communities/{communityId}/members` | `listCommunityMembers` | `cfmeet.messaging.http-api` |
+| DELETE | `/v1/messaging/communities/{communityId}/members/{principalId}` | `removeCommunityMember` | `cfmeet.messaging.http-api` |
+| PUT | `/v1/messaging/communities/{communityId}/members/{principalId}/role` | `setCommunityMemberRole` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/communities/{communityId}/owner` | `transferCommunityOwnership` | `cfmeet.messaging.http-api` |
+
+#### `FIRST_PARTY_EVENTS` (19)
+
+| Method | Path | operationId | Contract |
+|---|---|---|---|
+| GET | `/v1/messaging/events` | `listEvents` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/events` | `createEvent` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/events/calendar` | `exportEventCalendar` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/events/media` | `createEventMedia` | `cfmeet.messaging.http-api` |
+| DELETE | `/v1/messaging/events/media/{mediaId}` | `cancelEventMedia` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/events/media/{mediaId}` | `getEventMedia` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/events/media/{mediaId}/complete` | `completeEventMedia` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/events/media/{mediaId}/download-grants` | `grantEventMediaDownload` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/events/media/{mediaId}/parts/{part}` | `uploadEventMediaPart` | `cfmeet.messaging.http-api` |
+| DELETE | `/v1/messaging/events/{eventId}` | `deleteEvent` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/events/{eventId}` | `getEvent` | `cfmeet.messaging.http-api` |
+| PATCH | `/v1/messaging/events/{eventId}` | `updateEvent` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/events/{eventId}/attendees` | `listEventAttendees` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/events/{eventId}/cancel` | `cancelEvent` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/events/{eventId}/ics` | `exportEvent` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/events/{eventId}/invitations` | `inviteToEvent` | `cfmeet.messaging.http-api` |
+| DELETE | `/v1/messaging/events/{eventId}/invitations/{principalId}` | `removeEventInvitee` | `cfmeet.messaging.http-api` |
+| PUT | `/v1/messaging/events/{eventId}/reminders` | `setEventReminders` | `cfmeet.messaging.http-api` |
+| PUT | `/v1/messaging/events/{eventId}/rsvp` | `respondToEvent` | `cfmeet.messaging.http-api` |
+
 #### `FIRST_PARTY_IN_MEETING_APPS` (2)
 
 | Method | Path | operationId | Contract |
@@ -384,29 +453,60 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 324 
 | POST | `/v1/messaging/session-devices` | `issueSessionDeviceToken` | `cfmeet.messaging.http-api` |
 | POST | `/v1/messaging/session-devices/revoke` | `revokeSessionDevices` | `cfmeet.messaging.http-api` |
 
-#### `FIRST_PARTY_STATUS_CHANNELS` (53)
+#### `FIRST_PARTY_STATUS_CHANNELS` (84)
 
 | Method | Path | operationId | Contract |
 |---|---|---|---|
 | GET | `/v1/messaging/channels` | `listChannels` | `cfmeet.messaging.http-api` |
 | POST | `/v1/messaging/channels` | `createChannel` | `cfmeet.messaging.http-api` |
 | GET | `/v1/messaging/channels/following` | `listFollowedChannels` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/channels/invites/join` | `joinChannelInvite` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/channels/invites/preview` | `previewChannelInvite` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/channels/lookup` | `lookupChannelHandle` | `cfmeet.messaging.http-api` |
 | POST | `/v1/messaging/channels/media` | `createChannelMedia` | `cfmeet.messaging.http-api` |
 | DELETE | `/v1/messaging/channels/media/{mediaId}` | `cancelChannelMedia` | `cfmeet.messaging.http-api` |
 | GET | `/v1/messaging/channels/media/{mediaId}` | `getChannelMedia` | `cfmeet.messaging.http-api` |
 | POST | `/v1/messaging/channels/media/{mediaId}/complete` | `completeChannelMedia` | `cfmeet.messaging.http-api` |
 | POST | `/v1/messaging/channels/media/{mediaId}/download-grants` | `grantChannelMediaDownload` | `cfmeet.messaging.http-api` |
 | POST | `/v1/messaging/channels/media/{mediaId}/parts/{part}` | `uploadChannelMediaPart` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/channels/starred` | `listStarredChannelPosts` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/channels/suggestions` | `suggestChannels` | `cfmeet.messaging.http-api` |
 | DELETE | `/v1/messaging/channels/{channelId}` | `deleteChannel` | `cfmeet.messaging.http-api` |
 | GET | `/v1/messaging/channels/{channelId}` | `getChannel` | `cfmeet.messaging.http-api` |
 | PATCH | `/v1/messaging/channels/{channelId}` | `updateChannel` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/channels/{channelId}/admins` | `listChannelAdmins` | `cfmeet.messaging.http-api` |
+| DELETE | `/v1/messaging/channels/{channelId}/admins/{principalId}` | `removeChannelAdmin` | `cfmeet.messaging.http-api` |
+| PUT | `/v1/messaging/channels/{channelId}/admins/{principalId}` | `putChannelAdmin` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/channels/{channelId}/analytics` | `getChannelAnalytics` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/channels/{channelId}/audit` | `listChannelAudit` | `cfmeet.messaging.http-api` |
 | DELETE | `/v1/messaging/channels/{channelId}/follow` | `unfollowChannel` | `cfmeet.messaging.http-api` |
 | PUT | `/v1/messaging/channels/{channelId}/follow` | `followChannel` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/channels/{channelId}/invites` | `listChannelInvites` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/channels/{channelId}/invites` | `createChannelInvite` | `cfmeet.messaging.http-api` |
+| DELETE | `/v1/messaging/channels/{channelId}/invites/{inviteId}` | `revokeChannelInvite` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/channels/{channelId}/moderation` | `getChannelModeration` | `cfmeet.messaging.http-api` |
+| DELETE | `/v1/messaging/channels/{channelId}/mute` | `unmuteChannel` | `cfmeet.messaging.http-api` |
+| PUT | `/v1/messaging/channels/{channelId}/mute` | `muteChannel` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/channels/{channelId}/owner` | `transferChannelOwnership` | `cfmeet.messaging.http-api` |
 | GET | `/v1/messaging/channels/{channelId}/posts` | `listChannelPosts` | `cfmeet.messaging.http-api` |
 | POST | `/v1/messaging/channels/{channelId}/posts` | `createChannelPost` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/channels/{channelId}/posts/views` | `recordChannelPostViews` | `cfmeet.messaging.http-api` |
 | DELETE | `/v1/messaging/channels/{channelId}/posts/{postId}` | `deleteChannelPost` | `cfmeet.messaging.http-api` |
+| PATCH | `/v1/messaging/channels/{channelId}/posts/{postId}` | `editChannelPost` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/channels/{channelId}/posts/{postId}/forwards` | `forwardChannelPost` | `cfmeet.messaging.http-api` |
+| DELETE | `/v1/messaging/channels/{channelId}/posts/{postId}/pin` | `unpinChannelPost` | `cfmeet.messaging.http-api` |
+| PUT | `/v1/messaging/channels/{channelId}/posts/{postId}/pin` | `pinChannelPost` | `cfmeet.messaging.http-api` |
 | DELETE | `/v1/messaging/channels/{channelId}/posts/{postId}/reaction` | `unreactToChannelPost` | `cfmeet.messaging.http-api` |
 | PUT | `/v1/messaging/channels/{channelId}/posts/{postId}/reaction` | `reactToChannelPost` | `cfmeet.messaging.http-api` |
+| DELETE | `/v1/messaging/channels/{channelId}/posts/{postId}/star` | `unstarChannelPost` | `cfmeet.messaging.http-api` |
+| PUT | `/v1/messaging/channels/{channelId}/posts/{postId}/star` | `starChannelPost` | `cfmeet.messaging.http-api` |
+| DELETE | `/v1/messaging/channels/{channelId}/posts/{postId}/vote` | `retractChannelPollVote` | `cfmeet.messaging.http-api` |
+| PUT | `/v1/messaging/channels/{channelId}/posts/{postId}/vote` | `voteChannelPoll` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/channels/{channelId}/reports` | `reportChannel` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/channels/{channelId}/scheduled` | `listScheduledChannelPosts` | `cfmeet.messaging.http-api` |
+| DELETE | `/v1/messaging/channels/{channelId}/scheduled/{postId}` | `cancelScheduledChannelPost` | `cfmeet.messaging.http-api` |
+| GET | `/v1/messaging/channels/{channelId}/verification` | `getChannelVerification` | `cfmeet.messaging.http-api` |
+| POST | `/v1/messaging/channels/{channelId}/verification` | `applyChannelVerification` | `cfmeet.messaging.http-api` |
 | POST | `/v1/messaging/status` | `createStatus` | `cfmeet.messaging.http-api` |
 | GET | `/v1/messaging/status/audience` | `getStatusAudience` | `cfmeet.messaging.http-api` |
 | PUT | `/v1/messaging/status/audience` | `putStatusAudience` | `cfmeet.messaging.http-api` |

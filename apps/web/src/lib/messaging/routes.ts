@@ -69,7 +69,7 @@ const routes: Route[] = [
   ["PUT", `${st}/audience`, []], ["PUT", `${st}/close-friends`, []],
   ["PATCH", `${st}/audience-lists/${id}`, []], ["DELETE", `${st}/audience-lists/${id}`, []],
   ["PUT", `${st}/mutes/${id}`, []], ["DELETE", `${st}/mutes/${id}`, []],
-  ["GET", `${st}/${id}`, []], ["DELETE", `${st}/${id}`, []], ["POST", `${st}/${id}/view`, []],
+  ["GET", `${st}/${id}`, []], ["PATCH", `${st}/${id}`, []], ["DELETE", `${st}/${id}`, []], ["POST", `${st}/${id}/view`, []],
   ["PUT", `${st}/${id}/reaction`, []], ["DELETE", `${st}/${id}/reaction`, []], ["GET", `${st}/${id}/viewers`, []],
   ["GET", `${st}/${id}/replies`, []], ["POST", `${st}/${id}/replies`, []], ["POST", `${st}/${id}/forwards`, []], ["POST", `${st}/${id}/reshares`, []],
   // ADR 0071: Events (owned by Messaging; Meeting only relays them).
