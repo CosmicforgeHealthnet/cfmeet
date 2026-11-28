@@ -80,9 +80,9 @@ export default function LinkedDevices() {
                       {d.current && <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">This device</span>}
                       {d.primary && <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">Main phone</span>}
                     </p>
-                    <p className="flex items-center gap-1 truncate text-xs text-muted-foreground">
-                      {trusted ? <ShieldCheck className="size-3.5 shrink-0 text-emerald-600" /> : <ShieldQuestion className="size-3.5 shrink-0 text-amber-600" />}
-                      {trusted ? "Approved" : "Not approved for private messages"} · {d.current ? "active now" : `last active ${ago(d.lastSeenAt)}`}
+                    <p className="flex items-start gap-1 text-xs text-muted-foreground">
+                      {trusted ? <ShieldCheck className="mt-px size-3.5 shrink-0 text-emerald-600" /> : <ShieldQuestion className="mt-px size-3.5 shrink-0 text-amber-600" />}
+                      <span className="min-w-0">{trusted ? "Approved" : "Not approved for private messages"} · {d.current ? "active now" : `last active ${ago(d.lastSeenAt)}`}</span>
                     </p>
                   </div>
                   {!d.current && canManage ? (

@@ -223,6 +223,10 @@ struct Fx {
     backup_create_body: Value,
     backup_ready: String,
     backup_pending: String,
+    /// One of the owner's own chat lists (holding `conv`).
+    chat_list: String,
+    /// A MANAGED poll the owner sent in `conv`.
+    poll_msg: String,
 }
 
 impl Fx {
@@ -399,6 +403,27 @@ async fn fixture(h: &Harness, store: &MemoryObjectStore) -> Fx {
         .await;
     ok(&r, "member message");
     let member_msg = s(&r.json, "messageId");
+    let r = h
+        .post(
+            &a,
+            Some(owner.principal),
+            &format!("/v1/conversations/{conv}/messages"),
+            json!({ "clientMessageId": Uuid::new_v4(), "text": "Matrix lunch?",
+                    "poll": { "options": ["Pizza", "Sushi"] } }),
+        )
+        .await;
+    ok(&r, "poll");
+    let poll_msg = s(&r.json, "messageId");
+    let r = h
+        .post(
+            &a,
+            Some(owner.principal),
+            "/v1/messaging/chat-lists",
+            json!({ "name": "Matrix", "conversationIds": [conv] }),
+        )
+        .await;
+    ok(&r, "chat list");
+    let chat_list = s(&r.json, "listId");
     for path in [
         format!("/v1/conversations/{conv}/messages/{msg}/reactions/:wave:"),
         format!("/v1/conversations/{conv}/pins/{msg}"),
@@ -745,6 +770,8 @@ async fn fixture(h: &Harness, store: &MemoryObjectStore) -> Fx {
     let backup_create_body = json!({ "deviceId": owner_device, "size": create_bytes.len(),
         "sha256": sha256_hex(&create_bytes), "format": cf_messaging_crypto::backup::BACKUP_FORMAT_V1 });
     Fx {
+        chat_list,
+        poll_msg,
         invite_link,
         invite_token,
         invitee,
@@ -1058,6 +1085,32 @@ fn ops() -> Vec<Op> {
         Op { method: M::PUT, template: "/v1/conversations/{conversationId}/inbox-settings", scopes: READ, acting: AM, res: CONV,
              req: |f| r(format!("/v1/conversations/{}/inbox-settings", f.conv), Some(f.owner.principal), Some(json!({ "pinned": true }))),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        // The member's own chat lists (a list of another principal answers as absent).
+        Op { method: M::GET, template: "/v1/messaging/chat-lists", scopes: READ, acting: AM, res: Res::Env,
+             req: |f| r("/v1/messaging/chat-lists".into(), Some(f.owner.principal), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::POST, template: "/v1/messaging/chat-lists", scopes: READ, acting: AM, res: Res::Env,
+             req: |f| r("/v1/messaging/chat-lists".into(), Some(f.owner.principal), Some(json!({ "name": "Work", "conversationIds": [f.conv] }))),
+             ok: 201, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::PATCH, template: "/v1/messaging/chat-lists/{listId}", scopes: READ, acting: AM, res: CONV,
+             req: |f| r(format!("/v1/messaging/chat-lists/{}", f.chat_list), Some(f.owner.principal), Some(json!({ "name": "Family", "position": 0 }))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::DELETE, template: "/v1/messaging/chat-lists/{listId}", scopes: READ, acting: AM, res: CONV,
+             req: |f| r(format!("/v1/messaging/chat-lists/{}", f.chat_list), Some(f.owner.principal), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::PUT, template: "/v1/messaging/chat-lists/{listId}/conversations/{conversationId}", scopes: READ, acting: AM, res: CONV,
+             req: |f| r(format!("/v1/messaging/chat-lists/{}/conversations/{}", f.chat_list, f.sms_conv), Some(f.owner.principal), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::DELETE, template: "/v1/messaging/chat-lists/{listId}/conversations/{conversationId}", scopes: READ, acting: AM, res: CONV,
+             req: |f| r(format!("/v1/messaging/chat-lists/{}/conversations/{}", f.chat_list, f.conv), Some(f.owner.principal), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        // MANAGED polls.
+        Op { method: M::PUT, template: "/v1/conversations/{conversationId}/messages/{messageId}/poll/vote", scopes: SEND, acting: AM, res: CONV,
+             req: |f| r(format!("/v1/conversations/{}/messages/{}/poll/vote", f.conv, f.poll_msg), Some(f.owner.principal), Some(json!({ "optionIndexes": [1] }))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::POST, template: "/v1/conversations/{conversationId}/messages/{messageId}/poll/close", scopes: SEND, acting: AM, res: CONV,
+             req: |f| r(format!("/v1/conversations/{}/messages/{}/poll/close", f.conv, f.poll_msg), Some(f.owner.principal), Some(json!({}))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         Op { method: M::GET, template: "/v1/conversations/{conversationId}/events", scopes: READ, acting: AM, res: CONV,
              req: |f| r(format!("/v1/conversations/{}/events", f.conv), Some(f.owner.principal), None),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
@@ -1266,6 +1319,57 @@ const ELSEWHERE: &[(&str, &str, &str)] = &[
     ("POST", "/v1/messaging/user-sessions", "ADR 0062 partner user-token exchange (userToken, never a customer credential): tests/partner_session_devices.rs"),
     ("PUT", "/v1/messaging/user-push-registrations/{installationId}", "ADR 0063 partner push registration (userToken): tests/partner_session_devices.rs"),
     ("DELETE", "/v1/messaging/user-push-registrations/{installationId}", "ADR 0063 partner push removal (userToken): tests/partner_session_devices.rs"),
+    ("POST", "/v1/messaging/status", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("GET", "/v1/messaging/status/feed", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("GET", "/v1/messaging/status/mine", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("POST", "/v1/messaging/status/delete", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("POST", "/v1/messaging/status/rings", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("GET", "/v1/messaging/status/audience", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("PUT", "/v1/messaging/status/audience", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("GET", "/v1/messaging/status/eligible-contacts", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("GET", "/v1/messaging/status/close-friends", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("PUT", "/v1/messaging/status/close-friends", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("GET", "/v1/messaging/status/audience-lists", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("POST", "/v1/messaging/status/audience-lists", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("PATCH", "/v1/messaging/status/audience-lists/{listId}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("DELETE", "/v1/messaging/status/audience-lists/{listId}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("GET", "/v1/messaging/status/mutes", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("PUT", "/v1/messaging/status/mutes/{principalId}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("DELETE", "/v1/messaging/status/mutes/{principalId}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("POST", "/v1/messaging/status/media", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("GET", "/v1/messaging/status/media/{mediaId}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("DELETE", "/v1/messaging/status/media/{mediaId}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("POST", "/v1/messaging/status/media/{mediaId}/parts/{part}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("POST", "/v1/messaging/status/media/{mediaId}/complete", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("POST", "/v1/messaging/status/media/{mediaId}/download-grants", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("POST", "/v1/messaging/channels/media", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("GET", "/v1/messaging/channels/media/{mediaId}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("DELETE", "/v1/messaging/channels/media/{mediaId}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("POST", "/v1/messaging/channels/media/{mediaId}/parts/{part}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("POST", "/v1/messaging/channels/media/{mediaId}/complete", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("POST", "/v1/messaging/channels/media/{mediaId}/download-grants", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("GET", "/v1/messaging/status/{statusId}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("DELETE", "/v1/messaging/status/{statusId}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("POST", "/v1/messaging/status/{statusId}/view", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("PUT", "/v1/messaging/status/{statusId}/reaction", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("DELETE", "/v1/messaging/status/{statusId}/reaction", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("GET", "/v1/messaging/status/{statusId}/viewers", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("POST", "/v1/messaging/status/{statusId}/replies", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("POST", "/v1/messaging/status/{statusId}/forwards", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("POST", "/v1/messaging/status/{statusId}/reshares", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("GET", "/v1/messaging/channels", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("POST", "/v1/messaging/channels", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("GET", "/v1/messaging/channels/following", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("GET", "/v1/messaging/channels/{channelId}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("PATCH", "/v1/messaging/channels/{channelId}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("DELETE", "/v1/messaging/channels/{channelId}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("PUT", "/v1/messaging/channels/{channelId}/follow", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("DELETE", "/v1/messaging/channels/{channelId}/follow", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("GET", "/v1/messaging/channels/{channelId}/posts", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("POST", "/v1/messaging/channels/{channelId}/posts", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("DELETE", "/v1/messaging/channels/{channelId}/posts/{postId}", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("PUT", "/v1/messaging/channels/{channelId}/posts/{postId}/reaction", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
+    ("DELETE", "/v1/messaging/channels/{channelId}/posts/{postId}/reaction", "ADR 0069 status / channels: per-principal audience gate (mutual contacts, snapshots, blocks) certified by tests/social.rs"),
 ];
 
 // ---------------------------------------------------------------------- execution

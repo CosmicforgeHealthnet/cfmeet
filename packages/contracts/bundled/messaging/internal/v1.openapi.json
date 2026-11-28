@@ -6629,7 +6629,7 @@
                 "type": "null"
               }
             ],
-            "description": "Section 13: opaque avatar reference of a MANAGED conversation (for example an attachment id the client resolves); never a URL the server fetches."
+            "description": "Section 13: opaque avatar reference of a MANAGED conversation (for example an attachment id the client resolves); never a URL the server fetches. 1.36.0: attachment:<attachmentId> is a group photo attachment of the conversation."
           },
           "inbox": {
             "$ref": "#/components/schemas/messaging.common.v1.ConversationInbox"
@@ -6637,6 +6637,19 @@
           "announcementOnly": {
             "type": "boolean",
             "description": "S13: only OWNER / ADMIN members may send (send, edit and forward); others read and react as policy allows."
+          },
+          "description": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1.36.0: a MANAGED group's description (always null for DIRECT and PRIVATE_E2EE conversations, whose metadata belongs inside the MLS group)."
           }
         },
         "description": "The canonical Conversation aggregate. PRIVATE_E2EE: MLS 1.0 with the server-assigned 32-byte MLS group id; serverCanReadContent is false. MANAGED: no MLS binding; serverCanReadContent is true.",
@@ -6741,6 +6754,10 @@
               }
             ],
             "description": "F1 (1.34.0): when the member pinned this chat (the pin order); null when not pinned."
+          },
+          "favourite": {
+            "type": "boolean",
+            "description": "1.36.0: the member marked this chat as a favourite for itself (PUT /v1/conversations/{conversationId}/inbox-settings; WhatsApp Favourites). Independent of archive and pin; never visible to other members."
           }
         }
       },
@@ -6794,6 +6811,19 @@
               }
             ],
             "description": "MANAGED and ACTIVE only: the first 140 characters of the text. Always null for PRIVATE_E2EE (the server holds no plaintext and never returns ciphertext here) and for tombstones."
+          },
+          "presentation": {
+            "enum": [
+              "STANDARD",
+              "ANNOUNCEMENT",
+              "POLL"
+            ],
+            "description": "1.36.0, MANAGED and ACTIVE only: the message's presentation (a poll previews its question)."
+          },
+          "attachmentKind": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z_]{0,31}$",
+            "description": "1.36.0, MANAGED and ACTIVE only: the kind of the message's first attachment (e.g. IMAGE, VIDEO, VOICE_NOTE, DOCUMENT), for the chat list's icon."
           }
         }
       },

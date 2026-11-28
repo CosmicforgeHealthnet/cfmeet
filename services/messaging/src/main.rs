@@ -572,6 +572,21 @@ async fn main() -> anyhow::Result<()> {
             ),
             config.workers.interval,
         ));
+        // ADR 0069: status mention / share notices (their catalogue types must be active
+        // in the Notification Service first).
+        if std::env::var("MESSAGING_STATUS_NOTICES").as_deref() == Ok("on") {
+            state.status_notices = true;
+            tokio::spawn(messaging::social::notices::run(
+                state.clone(),
+                Arc::new(
+                    messaging::notification_publications::NotificationServiceEvents::new(
+                        state.service_auth.client(),
+                    ),
+                ),
+                config.workers.interval,
+            ));
+            tracing::info!("status notices are relayed to the Notification Service");
+        }
     } else {
         tracing::info!(
             "CF_NOTIFICATIONS_BASE_URL is not set: notification publications are not relayed"
@@ -678,6 +693,11 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(messaging::sms_bridge::run(
         state.clone(),
         config.workers.interval,
+    ));
+    // ADR 0069: statuses past 24 hours, unused / abandoned media and their bytes.
+    tokio::spawn(messaging::social::run_sweep(
+        state.clone(),
+        std::time::Duration::from_secs(60),
     ));
     tokio::spawn(messaging::workers::run_maintenance(
         state.clone(),

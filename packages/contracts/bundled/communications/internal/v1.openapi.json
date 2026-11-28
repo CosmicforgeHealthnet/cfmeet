@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet communications private Communications integration",
-    "version": "1.11.0",
-    "description": "Private backend interfaces for Sections 4–7. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals. 1.7.0: short CF Meet IDs (CF- plus 6 characters). 1.8.0 (S2): account-erasure and account-export for the account authority (communications-account.apply): a deleted account's Hub data is erased; the account's data download reads it back. 1.10.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every route from any other caller; the admin bridge's operator reads GET /internal/v1/communications/operator/profiles/{cfMeetId}, /reports, /holds, /audit and /metrics, each requiring communications.administer and X-CF-Operator. 1.9.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every route from any other caller; the admin bridge's operator reads GET /internal/v1/communications/operator/profiles/{cfMeetId}, /reports, /holds, /audit and /metrics, each requiring communications.administer and X-CF-Operator. 1.11.0 (ADR 0068 A4, admin bridge commands): POST /internal/v1/communications/operator/profiles/{cfMeetId}/suspend and /restore and /operator/reports/{reportId}/review (R3: X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest required), /operator/backfill and /operator/replay (R2), each requiring communications.administer, X-CF-Operator and Idempotency-Key, answering {status, version, resource} and recorded in communication_admin_operations in the same transaction; GET /internal/v1/operator/operations/{idempotencyKey}, the bridge's settlement record; OperatorReport.version (1 open, 2 reviewed)."
+    "version": "1.12.0",
+    "description": "Private backend interfaces for Sections 4–7. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals. 1.7.0: short CF Meet IDs (CF- plus 6 characters). 1.8.0 (S2): account-erasure and account-export for the account authority (communications-account.apply): a deleted account's Hub data is erased; the account's data download reads it back. 1.10.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every route from any other caller; the admin bridge's operator reads GET /internal/v1/communications/operator/profiles/{cfMeetId}, /reports, /holds, /audit and /metrics, each requiring communications.administer and X-CF-Operator. 1.9.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every route from any other caller; the admin bridge's operator reads GET /internal/v1/communications/operator/profiles/{cfMeetId}, /reports, /holds, /audit and /metrics, each requiring communications.administer and X-CF-Operator. 1.11.0 (ADR 0068 A4, admin bridge commands): POST /internal/v1/communications/operator/profiles/{cfMeetId}/suspend and /restore and /operator/reports/{reportId}/review (R3: X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest required), /operator/backfill and /operator/replay (R2), each requiring communications.administer, X-CF-Operator and Idempotency-Key, answering {status, version, resource} and recorded in communication_admin_operations in the same transaction; GET /internal/v1/operator/operations/{idempotencyKey}, the bridge's settlement record; OperatorReport.version (1 open, 2 reviewed). 1.12.0: POST /internal/v1/communications/contacts/eligible (Messaging only, communications-policy.check): the actor's mutual, unblocked, active contacts with eligibleSince, for status audiences (ADR 0069)."
   },
   "tags": [
     {
@@ -576,6 +576,104 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ContactNamesRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/contacts/eligible": {
+      "post": {
+        "operationId": "listEligibleContacts",
+        "summary": "List the actor's mutual, unblocked contacts (Messaging only)",
+        "description": "Status audiences (ADR 0069): the acting principal's contacts who may see its statuses. A contact is eligible only while the pair's connection is CONNECTED, BOTH people hold the contact in their own contact list, both profiles are ACTIVE and no block is active in either direction (any source: Communications, Calling or Messaging). One-way requests, shared groups, organizations, exchanged messages or a known CF Meet ID never count. `eligibleSince` is the later of the connection time and the pair's last block change: Messaging never shows a status published before it, so removing and re-adding a contact, or blocking and unblocking, never restores access to older statuses. With `principalIds` (at most 256) only those principals are considered; without it at most 5000 contacts are listed. The actor itself and unknown ids are left out without an error; an unknown or inactive actor has none. Callable by cfmeet.messaging only (permission communications-policy.check). 1.12.0.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "communications-policy.check",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The actor's eligible contacts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EligibleContactsResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission or delegated scope denied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EligibleContactsRequest"
               }
             }
           }
@@ -3458,6 +3556,66 @@
             "enum": [
               1
             ]
+          }
+        }
+      },
+      "EligibleContactsRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "actorPrincipalId"
+        ],
+        "properties": {
+          "actorPrincipalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "principalIds": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      },
+      "EligibleContactsResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "contacts"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "contacts": {
+            "type": "array",
+            "maxItems": 5000,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "principalId",
+                "eligibleSince"
+              ],
+              "properties": {
+                "principalId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "eligibleSince": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "When the pair last became eligible (connection or last block change)."
+                }
+              }
+            }
           }
         }
       },

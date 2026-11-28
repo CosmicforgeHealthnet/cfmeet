@@ -70,6 +70,8 @@ REDIS_URL=redis://:authtoken@cfmeet-redis.abc123.ng.0001.use1.cache.amazonaws.co
 | `JWT_SECRET` | Yes | - | Secret key for signing JWTs (min 64 characters recommended) |
 | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | No | `15` | Access token expiration in minutes |
 | `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | No | `7` | Refresh token expiration in days |
+| `ACCOUNT_MAX_OPEN_SESSIONS` | No | `50` (at least 5) | Open sign-ins per account; signing in past it ends the least recently used ones (`SUPERSEDED`) |
+| `ACCOUNT_REFRESH_REUSE_GRACE_SECONDS` | No | `60` (0-300) | How long after a rotation the refresh token it superseded is still answered (with tokens for the current one, without rotating) instead of ending the sign-in as reuse. Covers lost responses, timed-out proxies and two racing refreshes ([ADR 0070](decisions/0070-refresh-token-reuse-grace-window.md)). `0` = strict single use |
 
 **Generating a secure JWT secret:**
 ```bash

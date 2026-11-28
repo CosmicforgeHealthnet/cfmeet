@@ -124,8 +124,8 @@ export function MeetingRules({ org }: { org: BusinessOrganization }) {
   );
 }
 
-type Rule = { section: string; key: string; label: string; hint: string; fallback: boolean };
-const RULES: Rule[] = [
+export type Rule = { section: string; key: string; label: string; hint: string; fallback: boolean };
+export const RULES: Rule[] = [
   { section: "recording", key: "allowed", label: "Allow recording", hint: "Turn off to stop anyone recording meetings.", fallback: true },
   { section: "transcription", key: "allowed", label: "Allow transcripts", hint: "Turn off to stop live captions and transcripts.", fallback: true },
   { section: "exports", key: "chatExportAllowed", label: "Allow chat downloads", hint: "Lets hosts download in-meeting chat.", fallback: true },

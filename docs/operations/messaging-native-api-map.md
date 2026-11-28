@@ -1,8 +1,8 @@
 # Messaging — native authenticated API map
 
-Generated from the Account relay and Messaging 1.23.0 contract.
-Canonical SDK contract: **107 operations**; audience-filtered public Swagger:
-**91 operations**; native Account transports: **74 operations**.
+Generated from the Account relay and Messaging 1.25.0 contract.
+Canonical SDK contract: **115 operations**; audience-filtered public Swagger:
+**99 operations**; native Account transports: **87 operations**.
 There are no new canonical message/conversation/device endpoints.
 
 CF Meet consumer REST calls use the native path below with the existing Account bearer
@@ -219,8 +219,16 @@ required. Meetings and established permitted service contexts retain independent
 | PUT | `/v1/messaging/user-push-registrations/{installationId}` | registerUserPush | Not exposed by Account relay | Separate service/application context; not native personal Messaging |
 | DELETE | `/v1/messaging/user-push-registrations/{installationId}` | unregisterUserPush | Not exposed by Account relay | Separate service/application context; not native personal Messaging |
 | POST | `/v1/conversations/{conversationId}/owner` | transferConversationOwnership | `/api/v2/messaging/relay/v1/conversations/{conversationId}/owner` | Account session |
-| POST | `/v1/conversations/{conversationId}/messages/{messageId}/forward` | forwardMessage | Not exposed by Account relay | Separate service/application context; not native personal Messaging |
-| POST | `/v1/conversations/{conversationId}/invite-links` | createInviteLink | Not exposed by Account relay | Separate service/application context; not native personal Messaging |
-| GET | `/v1/conversations/{conversationId}/invite-links` | listInviteLinks | Not exposed by Account relay | Separate service/application context; not native personal Messaging |
-| POST | `/v1/conversations/{conversationId}/invite-links/{inviteLinkId}/revoke` | revokeInviteLink | Not exposed by Account relay | Separate service/application context; not native personal Messaging |
-| POST | `/v1/messaging/invite-links/join` | joinInviteLink | Not exposed by Account relay | Separate service/application context; not native personal Messaging |
+| POST | `/v1/conversations/{conversationId}/messages/{messageId}/forward` | forwardMessage | `/api/v2/messaging/relay/v1/conversations/{conversationId}/messages/{messageId}/forward` | Account session |
+| POST | `/v1/conversations/{conversationId}/invite-links` | createInviteLink | `/api/v2/messaging/relay/v1/conversations/{conversationId}/invite-links` | Account session |
+| GET | `/v1/conversations/{conversationId}/invite-links` | listInviteLinks | `/api/v2/messaging/relay/v1/conversations/{conversationId}/invite-links` | Account session |
+| POST | `/v1/conversations/{conversationId}/invite-links/{inviteLinkId}/revoke` | revokeInviteLink | `/api/v2/messaging/relay/v1/conversations/{conversationId}/invite-links/{inviteLinkId}/revoke` | Account session |
+| POST | `/v1/messaging/invite-links/join` | joinInviteLink | `/api/v2/messaging/relay/v1/messaging/invite-links/join` | Account session |
+| GET | `/v1/messaging/chat-lists` | listChatLists | `/api/v2/messaging/relay/v1/messaging/chat-lists` | Account session |
+| POST | `/v1/messaging/chat-lists` | createChatList | `/api/v2/messaging/relay/v1/messaging/chat-lists` | Account session |
+| PATCH | `/v1/messaging/chat-lists/{listId}` | updateChatList | `/api/v2/messaging/relay/v1/messaging/chat-lists/{listId}` | Account session |
+| DELETE | `/v1/messaging/chat-lists/{listId}` | deleteChatList | `/api/v2/messaging/relay/v1/messaging/chat-lists/{listId}` | Account session |
+| PUT | `/v1/messaging/chat-lists/{listId}/conversations/{conversationId}` | addChatListConversation | `/api/v2/messaging/relay/v1/messaging/chat-lists/{listId}/conversations/{conversationId}` | Account session |
+| DELETE | `/v1/messaging/chat-lists/{listId}/conversations/{conversationId}` | removeChatListConversation | `/api/v2/messaging/relay/v1/messaging/chat-lists/{listId}/conversations/{conversationId}` | Account session |
+| PUT | `/v1/conversations/{conversationId}/messages/{messageId}/poll/vote` | votePoll | `/api/v2/messaging/relay/v1/conversations/{conversationId}/messages/{messageId}/poll/vote` | Account session |
+| POST | `/v1/conversations/{conversationId}/messages/{messageId}/poll/close` | closePoll | `/api/v2/messaging/relay/v1/conversations/{conversationId}/messages/{messageId}/poll/close` | Account session |

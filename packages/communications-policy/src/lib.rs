@@ -196,6 +196,60 @@ impl PolicyClient {
     }
 }
 
+/// Path of the status-audience eligibility lookup (Messaging only).
+pub const ELIGIBLE_CONTACTS_PATH: &str = "/internal/v1/communications/contacts/eligible";
+
+/// One mutual, unblocked, active contact of the actor.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EligibleContact {
+    pub principal_id: Uuid,
+    /// RFC 3339: when the pair last became eligible (connection or last block change).
+    pub eligible_since: String,
+}
+
+impl PolicyClient {
+    /// The actor's MUTUAL, unblocked, active contacts (all, at most 5000, or only those of
+    /// `among`, at most 256) with the time each became eligible. Fail closed: any answer
+    /// but a valid schema-1 document is [`PolicyError::Unavailable`]; a scope this client
+    /// does not govern is [`PolicyError::Denied`].
+    pub async fn eligible_contacts(
+        &self,
+        scope: DelegatedPlatformContext,
+        actor: Uuid,
+        among: Option<&[Uuid]>,
+    ) -> Result<Vec<EligibleContact>, PolicyError> {
+        if !self.governs(Scope::of(&scope)) {
+            return Err(PolicyError::Denied);
+        }
+        let req = OutboundServiceRequest::new_operation(ServiceId::communications())
+            .with_delegated_context(scope);
+        let mut body = serde_json::json!({ "actorPrincipalId": actor });
+        if let Some(among) = among {
+            body["principalIds"] = serde_json::json!(among);
+        }
+        let response = self
+            .client
+            .post_json(&req, ELIGIBLE_CONTACTS_PATH, &body)
+            .await
+            .map_err(|_| PolicyError::Unavailable)?;
+        if response.status() != 200 {
+            return Err(PolicyError::Unavailable);
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Answer {
+            schema_version: u32,
+            contacts: Vec<EligibleContact>,
+        }
+        let answer: Answer = response.json().map_err(|_| PolicyError::Unavailable)?;
+        if answer.schema_version != 1 {
+            return Err(PolicyError::Unavailable);
+        }
+        Ok(answer.contacts)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

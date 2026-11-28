@@ -1,14 +1,15 @@
 "use client";
 
 /**
- * F4-F7 in private chats (WhatsApp): polls, locations, contact cards and link previews,
- * all inside the end-to-end encrypted content. The bubble part shows one; the composer part
- * (the paperclip menu, private chats only) creates one.
+ * F4-F7 (WhatsApp): polls, locations, contact cards and link previews. In private chats all
+ * of them travel inside the end-to-end encrypted content; in synced chats a poll is a
+ * server message whose votes (and who cast them) members see live. The bubble part shows
+ * one; the composer part (the paperclip menu) creates one.
  */
 import { useState } from "react";
 import Image from "next/image";
 import LinkPreviewDialog from "./LinkPreviewDialog";
-import { BarChart3, Check, ExternalLink, FileText, Link2, MapPin, Paperclip, Search, UserRound, X } from "lucide-react";
+import { BarChart3, Check, ExternalLink, FileText, Image as ImageIcon, Link2, Lock, MapPin, Paperclip, Search, UserRound, X } from "lucide-react";
 import { Popover } from "radix-ui";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -20,12 +21,17 @@ import { connectedContacts, contactLabel } from "@/lib/communications/comms-core
 const card = (mine: boolean) => cn("mt-1 block w-full min-w-52 rounded-xl p-2.5 text-left", mine ? "bg-white/15" : "bg-background/70");
 
 /** One structured message inside its bubble. */
-export function RichContentView({ rich, mine, onVote, onMessageContact }: {
+export function RichContentView({ rich, mine, onVote, onClosePoll, onMessageContact, names }: {
   rich: RichContent;
   mine: boolean;
   onVote?: (choices: number[]) => void;
+  /** Close a synced chat's poll (its sender or a group admin). */
+  onClosePoll?: () => void;
   onMessageContact?: (cfMeetId: string) => void;
+  /** Member names, for "View votes" of a synced chat's poll. */
+  names?: Record<string, string>;
 }) {
+  const [votesOpen, setVotesOpen] = useState(false);
   if (rich.kind === "link") {
     const p = rich.preview;
     return (
@@ -68,7 +74,7 @@ export function RichContentView({ rich, mine, onVote, onMessageContact }: {
   }
   const total = rich.tally.voters;
   const toggle = (i: number) => {
-    if (!onVote) return;
+    if (!onVote || rich.closed) return;
     const mineNow = rich.tally.myChoices;
     if (rich.multiple) onVote(mineNow.includes(i) ? mineNow.filter((c) => c !== i) : [...mineNow, i].sort((a, b) => a - b));
     else onVote(mineNow.includes(i) ? [] : [i]);
@@ -76,14 +82,14 @@ export function RichContentView({ rich, mine, onVote, onMessageContact }: {
   return (
     <div className={card(mine)} data-testid="poll">
       <p className="flex items-center gap-1.5 text-sm font-semibold"><BarChart3 className="size-4" />{rich.question}</p>
-      <p className="mb-1.5 text-[11px] opacity-70">{rich.multiple ? "Select one or more" : "Select one"}</p>
+      <p className="mb-1.5 flex items-center gap-1 text-[11px] opacity-70">{rich.closed ? <><Lock className="size-3" />Poll closed</> : rich.multiple ? "Select one or more" : "Select one"}</p>
       <ul className="space-y-1">
         {rich.options.map((o, i) => {
           const chosen = rich.tally.myChoices.includes(i);
           const share = total ? Math.round((rich.tally.counts[i] / total) * 100) : 0;
           return (
             <li key={i}>
-              <button type="button" disabled={!onVote} onClick={() => toggle(i)} aria-pressed={chosen} className="relative flex w-full items-center gap-2 overflow-hidden rounded-lg px-2 py-1.5 text-left text-sm disabled:cursor-default">
+              <button type="button" disabled={!onVote || rich.closed} onClick={() => toggle(i)} aria-pressed={chosen} className="relative flex w-full items-center gap-2 overflow-hidden rounded-lg px-2 py-1.5 text-left text-sm disabled:cursor-default">
                 <span aria-hidden className={cn("absolute inset-y-0 left-0", mine ? "bg-white/20" : "bg-primary/15")} style={{ width: `${share}%` }} />
                 <span className={cn("relative flex size-4 shrink-0 items-center justify-center rounded-full border", chosen ? "border-current bg-current/20" : "border-current/50")}>{chosen ? <Check className="size-3" /> : null}</span>
                 <span className="relative min-w-0 flex-1 truncate">{o}</span>
@@ -93,7 +99,33 @@ export function RichContentView({ rich, mine, onVote, onMessageContact }: {
           );
         })}
       </ul>
-      <p className="mt-1 text-[11px] opacity-70">{total === 1 ? "1 vote" : `${total} votes`}</p>
+      <div className="mt-1 flex items-center justify-between gap-2 text-[11px]">
+        <span className="opacity-70">{total === 1 ? "1 vote" : `${total} votes`}</span>
+        <span className="flex items-center gap-1">
+          {rich.voters && total ? <button type="button" onClick={() => setVotesOpen(true)} className="rounded-full px-2 py-0.5 font-semibold hover:bg-black/5" data-testid="poll-view-votes">View votes</button> : null}
+          {onClosePoll ? <button type="button" onClick={onClosePoll} className="rounded-full px-2 py-0.5 font-semibold hover:bg-black/5" data-testid="poll-close">Close poll</button> : null}
+        </span>
+      </div>
+      {votesOpen && rich.voters ? (
+        <Dialog open onOpenChange={(v) => !v && setVotesOpen(false)}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Poll details</DialogTitle>
+              <DialogDescription className="break-words">{rich.question}</DialogDescription>
+            </DialogHeader>
+            <div className="max-h-96 space-y-4 overflow-y-auto" data-testid="poll-votes">
+              {rich.options.map((o, i) => (
+                <section key={i}>
+                  <h3 className="flex items-baseline justify-between gap-2 text-sm font-semibold"><span className="min-w-0 break-words">{o}</span><span className="shrink-0 text-xs font-normal text-muted-foreground">{rich.tally.counts[i] === 1 ? "1 vote" : `${rich.tally.counts[i]} votes`}</span></h3>
+                  <ul className="mt-1 space-y-0.5 text-sm">
+                    {(rich.voters?.[i] ?? []).map((p) => <li key={p} className="truncate text-muted-foreground">{names?.[p] ?? "CF Meet user"}</li>)}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </div>
   );
 }
@@ -104,21 +136,31 @@ const field = "h-10 w-full rounded-xl border border-border bg-background px-3 te
  * The chat's one attach button (WhatsApp): a file straight away in chats that only take files;
  * in a private chat a menu of Document, Link card, Poll, Location and Contact.
  */
-export function AttachMenu({ canAttach, canShare, disabled, onFile, onSend, fileTitle }: {
+export function AttachMenu({ canAttach, canShare, canPoll = false, disabled, onFile, onMedia, onSend, fileTitle }: {
   canAttach: boolean;
   canShare: boolean;
+  /** Synced chats: a poll (a server message) next to photos and documents. */
+  canPoll?: boolean;
   disabled: boolean;
   onFile: () => void;
+  /** Photos & videos picker (WhatsApp's first attach entry). */
+  onMedia?: () => void;
   onSend: (payload: RichPayload) => Promise<void>;
   fileTitle: string;
 }) {
   const [open, setOpen] = useState<"poll" | "location" | "contact" | "link" | null>(null);
   const [menu, setMenu] = useState(false);
   const button = "flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40";
-  if (!canShare) {
+  if (!canShare && !onMedia && !canPoll) {
     return <button type="button" className={button} disabled={disabled || !canAttach} onClick={onFile} aria-label="Attach a file" title={fileTitle}><Paperclip className="size-5" /></button>;
   }
-  const items: { key: string; label: string; icon: typeof FileText; tint: string; run: () => void; off?: boolean }[] = [
+  const media = onMedia ? [{ key: "media", label: "Photos & videos", icon: ImageIcon, tint: "bg-blue-600", run: onMedia, off: !canAttach }] : [];
+  const items: { key: string; label: string; icon: typeof FileText; tint: string; run: () => void; off?: boolean }[] = !canShare ? [
+    ...media,
+    { key: "file", label: "Document", icon: FileText, tint: "bg-violet-600", run: onFile, off: !canAttach },
+    ...(canPoll ? [{ key: "poll", label: "Poll", icon: BarChart3, tint: "bg-amber-500", run: () => setOpen("poll") }] : []),
+  ] : [
+    ...media,
     { key: "file", label: "Document", icon: FileText, tint: "bg-violet-600", run: onFile, off: !canAttach },
     { key: "link", label: "Link card", icon: Link2, tint: "bg-indigo-600", run: () => setOpen("link") },
     { key: "poll", label: "Poll", icon: BarChart3, tint: "bg-amber-500", run: () => setOpen("poll") },
@@ -142,12 +184,12 @@ export function AttachMenu({ canAttach, canShare, disabled, onFile, onSend, file
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>
-      {open === "link" ? <LinkPreviewDialog onClose={() => setOpen(null)} onSend={onSend} /> : open ? <ShareDialog kind={open} onClose={() => setOpen(null)} onSend={onSend} /> : null}
+      {open === "link" ? <LinkPreviewDialog onClose={() => setOpen(null)} onSend={onSend} /> : open ? <ShareDialog kind={open} encrypted={canShare} onClose={() => setOpen(null)} onSend={onSend} /> : null}
     </>
   );
 }
 
-function ShareDialog({ kind, onClose, onSend }: { kind: "poll" | "location" | "contact"; onClose: () => void; onSend: (payload: RichPayload) => Promise<void> }) {
+function ShareDialog({ kind, encrypted, onClose, onSend }: { kind: "poll" | "location" | "contact"; encrypted: boolean; onClose: () => void; onSend: (payload: RichPayload) => Promise<void> }) {
   const [question, setQuestion] = useState("");
   const [options, setOptions] = useState(["", ""]);
   const [multiple, setMultiple] = useState(false);
@@ -188,7 +230,7 @@ function ShareDialog({ kind, onClose, onSend }: { kind: "poll" | "location" | "c
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{kind === "poll" ? "Create poll" : kind === "location" ? "Share location" : "Share a contact"}</DialogTitle>
-          <DialogDescription>End-to-end encrypted: only people in this chat can see it.</DialogDescription>
+          <DialogDescription>{encrypted ? "End-to-end encrypted: only people in this chat can see it." : "People in this chat can vote and see who voted for what."}</DialogDescription>
         </DialogHeader>
         <div className="space-y-2.5">
           {kind === "poll" ? (

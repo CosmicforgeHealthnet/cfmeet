@@ -2,10 +2,11 @@
  * Calendar hooks (Blueprint Section 10 / 17): one agenda query per visible range, occurrence
  * changes, calendar files and the meeting capabilities of the selected workspace.
  */
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { conferencesService } from "@/services/v2/conferences.service";
 import { spacesService } from "@/services/v2/spaces.service";
-import { fetchAgendaRange } from "@/lib/meeting-calendar";
+import { agendaItemKey, fetchAgendaRange } from "@/lib/meeting-calendar";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import type { AgendaQuery } from "@/types/generated/meeting-service";
 import type { RecurrenceExceptionRequest, RescheduleConferenceRequest } from "@/types/v2";
@@ -25,6 +26,50 @@ export function useAgendaRange(query: Omit<AgendaQuery, "cursor">, enabled = tru
     placeholderData: (previous) => previous,
     retry: (count, error) => count < 2 && ![401, 403].includes((error as { response?: { status?: number } })?.response?.status ?? 0),
   });
+}
+
+const minute = () => Math.floor(Date.now() / 60_000) * 60_000;
+
+/**
+ * What's next: meetings starting from an hour ago over the next week, plus any meeting still
+ * LIVE that started earlier (the agenda filters by start time, so a long meeting would
+ * otherwise drop off while people are still in it). The window moves on every 5 minutes.
+ */
+export function useUpcomingMeetings(limit: number, organizationId?: string | null) {
+  const [now, setNow] = useState(minute);
+  useEffect(() => {
+    const t = setInterval(() => setNow(minute()), 5 * 60_000);
+    return () => clearInterval(t);
+  }, []);
+  const org = organizationId ? { organizationId } : {};
+  const upcoming = useAgendaPage(useMemo(() => ({
+    from: new Date(now - 60 * 60_000).toISOString(),
+    to: new Date(now + 7 * 86_400_000).toISOString(),
+    status: "CREATED,PREPARING,WAITING,LIVE",
+    limit,
+    ...org,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [now, limit, organizationId]));
+  const live = useAgendaPage(useMemo(() => ({
+    from: new Date(now - 24 * 3_600_000).toISOString(),
+    to: new Date(now - 60 * 60_000).toISOString(),
+    status: "LIVE",
+    limit: 5,
+    ...org,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [now, organizationId]));
+  const data = useMemo(() => {
+    if (!upcoming.data) return undefined;
+    const seen = new Set<string>();
+    const items = [...(live.data?.items ?? []), ...upcoming.data.items].filter((i) => {
+      const k = agendaItemKey(i);
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    return { ...upcoming.data, items: items.slice(0, limit) };
+  }, [upcoming.data, live.data, limit]);
+  return { ...upcoming, data };
 }
 
 /** One page of the agenda (dashboard "upcoming"). */

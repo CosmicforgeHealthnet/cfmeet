@@ -98,9 +98,11 @@ async fn login_opens_a_session_with_typed_tokens_and_case_insensitive_email() {
     assert_eq!(refresh(&app, &access).await.0, StatusCode::UNAUTHORIZED);
 }
 
+/// Also ADR 0070 (e): a grace window of 0 restores strict single use, so even the token
+/// superseded a moment ago is reuse.
 #[tokio::test]
 async fn refresh_rotates_and_reuse_ends_the_whole_session() {
-    let app = app_with_redis!();
+    let app = app_with_redis!().with_auth_env(&[("ACCOUNT_REFRESH_REUSE_GRACE_SECONDS", "0")]);
     let id = email_user(&app, "rotate@example.com", "active").await;
     let (_, r1) = login(&app, "rotate@example.com").await;
 
@@ -127,6 +129,188 @@ async fn refresh_rotates_and_reuse_ends_the_whole_session() {
     );
     assert_eq!(
         app.scalar(&format!(
+            "SELECT count(*) FROM account_security_events WHERE user_id = '{id}' AND event_type = 'REFRESH_TOKEN_REUSE'"
+        ))
+        .await,
+        1
+    );
+}
+
+fn tokens(v: &Value) -> (String, String) {
+    (
+        v["access_token"].as_str().unwrap().to_string(),
+        v["refresh_token"].as_str().unwrap().to_string(),
+    )
+}
+
+async fn count(app: &TestApp, sql: String) -> i64 {
+    app.scalar(&sql).await
+}
+
+/// ADR 0070 (a, b): the token superseded by the last rotation, presented again within the
+/// grace window (a lost response, a timed-out proxy, two racing refreshes), is answered
+/// with tokens for the CURRENT refresh id. Nothing rotates, the session stays open, and
+/// the current token keeps refreshing normally.
+#[tokio::test]
+async fn previous_refresh_token_within_the_grace_window_converges_on_the_current_one() {
+    let app = app_with_redis!();
+    assert_eq!(app.state.auth_policy.refresh_reuse_grace_secs, 60);
+    let id = email_user(&app, "grace@example.com", "active").await;
+    let (_, r1) = login(&app, "grace@example.com").await;
+    let sid = claims(&app, &r1).sid.unwrap();
+
+    let (s, v) = refresh(&app, &r1).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (_, r2) = tokens(&v);
+
+    // (a) The retry of r1 gets a token pair for r2's refresh id, and nothing rotates.
+    let (s, v) = refresh(&app, &r1).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (a_retry, r_retry) = tokens(&v);
+    assert_eq!(claims(&app, &r_retry).rti, claims(&app, &r2).rti);
+    assert_eq!(claims(&app, &r_retry).sid.as_deref(), Some(sid.as_str()));
+    assert_eq!(
+        both_ingresses(&app, &a_retry).await,
+        (StatusCode::OK, StatusCode::OK)
+    );
+    assert_eq!(
+        count(
+            &app,
+            format!("SELECT refresh_generation::bigint FROM account_sessions WHERE id = '{sid}'")
+        )
+        .await,
+        1,
+        "the grace answer does not rotate"
+    );
+    assert_eq!(
+        count(
+            &app,
+            format!(
+                "SELECT count(*) FROM account_sessions WHERE id = '{sid}' AND revoked_at IS NULL"
+            )
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        count(
+            &app,
+            format!(
+                "SELECT count(*) FROM account_security_events WHERE user_id = '{id}' \
+             AND event_type = 'REFRESH_TOKEN_GRACE_REUSE' AND outcome = 'SUCCESS'"
+            )
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        count(
+            &app,
+            format!(
+                "SELECT count(*) FROM account_security_events WHERE user_id = '{id}' \
+             AND event_type = 'REFRESH_TOKEN_REUSE'"
+            )
+        )
+        .await,
+        0
+    );
+
+    // (b) Both racers now hold the current token; it rotates as usual, once.
+    let (s, v) = refresh(&app, &r2).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (a3, r3) = tokens(&v);
+    assert_ne!(claims(&app, &r3).rti, claims(&app, &r2).rti);
+    assert_eq!(
+        both_ingresses(&app, &a3).await,
+        (StatusCode::OK, StatusCode::OK)
+    );
+    // The other racer's copy of r2 is now the previous token: still a benign retry.
+    let (s, v) = refresh(&app, &r_retry).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(claims(&app, &tokens(&v).1).rti, claims(&app, &r3).rti);
+    assert_eq!(
+        count(
+            &app,
+            format!(
+                "SELECT count(*) FROM account_sessions WHERE id = '{sid}' AND revoked_at IS NULL"
+            )
+        )
+        .await,
+        1
+    );
+}
+
+/// ADR 0070 (c): the previous token presented after the grace window is reuse, as before.
+#[tokio::test]
+async fn previous_refresh_token_after_the_grace_window_ends_the_session() {
+    let app = app_with_redis!();
+    let id = email_user(&app, "grace.late@example.com", "active").await;
+    let (_, r1) = login(&app, "grace.late@example.com").await;
+    let sid = claims(&app, &r1).sid.unwrap();
+    let (s, v) = refresh(&app, &r1).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (a2, r2) = tokens(&v);
+
+    app.db
+        .conn
+        .execute_unprepared(&format!(
+            "UPDATE account_sessions SET last_refreshed_at = now() - interval '61 seconds' \
+             WHERE id = '{sid}'"
+        ))
+        .await
+        .unwrap();
+    assert_eq!(refresh(&app, &r1).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(refresh(&app, &r2).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        both_ingresses(&app, &a2).await,
+        (StatusCode::UNAUTHORIZED, StatusCode::UNAUTHORIZED)
+    );
+    assert_eq!(
+        count(&app, format!(
+            "SELECT count(*) FROM account_sessions WHERE id = '{sid}' AND revoke_reason = 'REFRESH_REUSE'"
+        ))
+        .await,
+        1
+    );
+    assert_eq!(
+        count(&app, format!(
+            "SELECT count(*) FROM account_security_events WHERE user_id = '{id}' AND event_type = 'REFRESH_TOKEN_REUSE'"
+        ))
+        .await,
+        1
+    );
+}
+
+/// ADR 0070 (d): only the token superseded by the LAST rotation is forgiven. A token two
+/// generations old is reuse even inside the window.
+#[tokio::test]
+async fn refresh_token_two_generations_old_ends_the_session_within_the_window() {
+    let app = app_with_redis!();
+    let id = email_user(&app, "grace.old@example.com", "active").await;
+    let (_, r1) = login(&app, "grace.old@example.com").await;
+    let sid = claims(&app, &r1).sid.unwrap();
+    let (s, v) = refresh(&app, &r1).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (_, r2) = tokens(&v);
+    let (s, v) = refresh(&app, &r2).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (a3, r3) = tokens(&v);
+
+    assert_eq!(refresh(&app, &r1).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(refresh(&app, &r3).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        both_ingresses(&app, &a3).await,
+        (StatusCode::UNAUTHORIZED, StatusCode::UNAUTHORIZED)
+    );
+    assert_eq!(
+        count(&app, format!(
+            "SELECT count(*) FROM account_sessions WHERE id = '{sid}' AND revoke_reason = 'REFRESH_REUSE'"
+        ))
+        .await,
+        1
+    );
+    assert_eq!(
+        count(&app, format!(
             "SELECT count(*) FROM account_security_events WHERE user_id = '{id}' AND event_type = 'REFRESH_TOKEN_REUSE'"
         ))
         .await,

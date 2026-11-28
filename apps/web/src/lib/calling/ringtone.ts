@@ -6,6 +6,8 @@
 
 export interface Ringtone {
   start: () => Promise<boolean>;
+  /** Resumes a ringtone the browser held back; call it from a user gesture. */
+  unlock: () => Promise<boolean>;
   stop: () => void;
 }
 
@@ -44,6 +46,12 @@ export function createRingtone(): Ringtone {
       } catch {
         return false;
       }
+    },
+    async unlock() {
+      if (!context) return false;
+      await context.resume().catch(() => undefined);
+      if (context.state === "running") burst();
+      return context.state === "running";
     },
     stop() {
       if (timer) clearInterval(timer);

@@ -166,6 +166,8 @@ pub async fn create(
                 )
                 .await?;
                 if n == 1 {
+                    // ADR 0069: a block removes each from the other's status audiences for good.
+                    crate::social::status::revoke_pair(txn, env, me, blocked).await?;
                     crate::audit::record(
                         txn,
                         crate::audit::AuditEntry {

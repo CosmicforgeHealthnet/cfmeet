@@ -24,7 +24,8 @@ Operations
   deploy-monitoring            Prometheus, Alertmanager, blackbox and heartbeat exporters
                                (monitoring_stack.py); also run after every successful release,
                                where a monitoring failure is reported but never fails it.
-  activate-* / org-cutover-*   separately approved activation steps (see ACTIVATIONS); the CF Meet
+  activate-* / org-cutover-*   separately approved activation steps (see ACTIVATIONS; social-channels-*
+                               copies the retired Meeting Service channels into Messaging, ADR 0069); the CF Meet
                                Platform "Build" phases live in platform_operations.py, the CF Meet
                                Apps ("Integrate") phases in integrate_operations.py.
   platform-acceptance          two fresh developer workspaces through the public API (cleaned up):
@@ -71,6 +72,7 @@ WORK = p.ROOT / 'coordinated'
 BACKUPS = p.ROOT / 'backups'
 JOURNAL = WORK / 'journal.json'
 CUTOVER = WORK / 'org-cutover'
+SOCIAL_COPY = WORK / 'social-channels'
 TLS_CONF = p.ROOT / 'tls-proxy' / 'nginx.conf'
 IMAGE_REPO = 'ghcr.io/cosmicforgehealthnet/cfmeet-'
 PROBE_IMAGE = 'curlimages/curl:8.12.1'
@@ -2852,6 +2854,113 @@ def org_authoritative(sha, run_id, confirm):
                      [('meeting-service', {'ORGANIZATIONS_AUTHORITY_MODE': 'authoritative'})], irreversible=True)
 
 
+# --- ADR 0069: one-time copy of the retired Meeting Service channels into Messaging ----------
+
+SOCIAL_SCOPE_VARS = ('CFMEET_COMMUNICATION_TENANT_ID', 'CFMEET_COMMUNICATION_APPLICATION_ID',
+                     'CFMEET_COMMUNICATION_ENVIRONMENT_ID')
+SOCIAL_COUNTS = ('channels', 'followers', 'posts', 'reactions', 'media')
+
+
+def shred(path):
+    """Overwrites the snapshot (channel posts and media) before unlinking it; idempotent."""
+    path = Path(path)
+    if not path.exists():
+        return
+    size = path.stat().st_size
+    with open(path, 'r+b') as f:
+        while f.tell() < size:
+            f.write(b'\0' * min(1 << 20, size - f.tell()))
+        f.flush()
+        os.fsync(f.fileno())
+    path.unlink()
+
+
+def social_channels_export(sha, run_id, confirm):
+    """ADR 0069 "Rollout" 2: the Meeting backend image's own read-only exporter
+    (export-social-channels, one REPEATABLE READ, READ ONLY transaction) into a 0600 root file.
+    Runs only after the backend release (the dispatcher's require_release: every service on the
+    released images, so the exporter exists). Only counts and the checksum are reported."""
+    meeting = p.inspect(MEETING)
+    env = p.env_of(meeting)
+    missing = [k for k in ('DATABASE_URL',) + SOCIAL_SCOPE_VARS if not env.get(k)]
+    if missing:
+        raise RuntimeError('The Meeting Service lacks ' + ', '.join(missing))
+    folder = SOCIAL_COPY / run_id
+    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    out = folder / 'social-channels.json'
+    out.touch(mode=0o600)
+    env_path = release.env_file(WORK / 'run' / 'social-export.env',
+                                {k: env[k] for k in ('DATABASE_URL',) + SOCIAL_SCOPE_VARS})
+    try:
+        with open(out, 'wb') as f:
+            proc = subprocess.run(['docker', 'run', '--rm', '--network', 'container:' + MEETING,
+                                   '--env-file', str(env_path),
+                                   '--entrypoint', '/app/export-social-channels', meeting['Image']],
+                                  stdout=f, stderr=subprocess.PIPE, text=False)
+    finally:
+        env_path.unlink(missing_ok=True)
+    if proc.returncode:
+        shred(out)
+        raise RuntimeError('Social channels export failed: ' + scrub(proc.stderr.decode(errors='replace')))
+    try:
+        doc = json.loads(out.read_text())
+        if doc['scope']['environmentId'] != env['CFMEET_COMMUNICATION_ENVIRONMENT_ID']:
+            raise RuntimeError('The export is not of the CF Meet communication environment')
+    except Exception:
+        shred(out)
+        raise
+    summary = dict(runId=run_id, at=now(), file=str(out), environmentId=doc['scope']['environmentId'],
+                   schemaVersion=doc['schemaVersion'], counts=doc['counts'], skipped=doc['skipped'],
+                   checksum=doc['checksum'])
+    p.write_private(SOCIAL_COPY / 'latest-export.json', json.dumps(summary))
+    emit('socialChannelsExport', {k: v for k, v in summary.items() if k != 'file'})
+    record_step('social-channels-export', sha, run_id)
+    return summary
+
+
+def messaging_social_import(export_path, environment, operator):
+    """messaging-admin inside the running Messaging container (its database role, attachment
+    bucket settings and mounted bucket secret); the 0600 snapshot is streamed on stdin and
+    never mounted. Prints counts and ids only (imported / unchanged / refused)."""
+    args = ['docker', 'exec', '-i', SERVICES['messaging']['container'], '/app/messaging-admin', 'social',
+            'import-channels', '--file', '-', '--environment', environment, '--operator', operator]
+    return json.loads(run_binary(args, stdin_path=export_path, step='social import-channels').decode())
+
+
+def social_import_summary(report):
+    return dict(imported={k: report['imported'][k] for k in SOCIAL_COUNTS},
+                unchanged={k: report['unchanged'][k] for k in SOCIAL_COUNTS},
+                refused=len(report['refused']))
+
+
+def social_channels_import(sha, run_id, confirm):
+    """ADR 0069 "Rollout" 2: import, then import the same snapshot again and fail unless every
+    count is unchanged (nothing imported, the same records unchanged, the same refusals); the
+    snapshot is shredded afterwards whatever the outcome (export again to retry). Refused
+    records (ids in use, invalid content) stop the step unless the owner accepts them
+    (confirm: refusals-accepted); the refusal ids are in the SOCIAL_LEGACY_IMPORT audit entry."""
+    latest = json.loads((SOCIAL_COPY / 'latest-export.json').read_text())
+    export_path = Path(latest['file'])
+    if not export_path.exists():
+        raise RuntimeError('Latest social channels export already consumed; run social-channels-export again')
+    operator = 'coordinated-release:' + run_id
+    try:
+        first = social_import_summary(messaging_social_import(export_path, latest['environmentId'], operator))
+        emit('socialChannelsImport', first)
+        if first['refused'] and 'refusals-accepted' not in confirm:
+            raise RuntimeError('The import refused %d record(s) (see the SOCIAL_LEGACY_IMPORT audit entry); '
+                               'owner decision required (confirm: refusals-accepted)' % first['refused'])
+        again = social_import_summary(messaging_social_import(export_path, latest['environmentId'], operator))
+        emit('socialChannelsImportRepeat', again)
+        total = {k: first['imported'][k] + first['unchanged'][k] for k in SOCIAL_COUNTS}
+        if any(again['imported'].values()) or again['unchanged'] != total or again['refused'] != first['refused']:
+            raise RuntimeError('A repeated social channels import was not fully unchanged')
+    finally:
+        shred(export_path)  # channel posts and media: never kept after the import
+    p.write_private(SOCIAL_COPY / 'latest-import.json', json.dumps(dict(runId=run_id, at=now(), **first)))
+    record_step('social-channels-import', sha, run_id)
+
+
 def activate_enterprise_calling(sha, run_id, confirm):
     meeting = env_of('meeting-service')
     if meeting.get('ORGANIZATIONS_AUTHORITY_MODE') != 'authoritative':
@@ -3770,6 +3879,10 @@ ACTIVATIONS = {
     # Owner decision 2026-11-13: an empty dataset may skip import/shadow/7-day observation.
     'org-cutover-first-activation': (('activate-org-events',), lambda sha, run_id, confirm:
                                      org_first_activation.activate(sys.modules[__name__], sha, run_id, confirm)),
+    # ADR 0069: one-time, repeatable copy of the retired Meeting Service channels into Messaging,
+    # after the backend release (require_release): export, then import twice (all unchanged).
+    'social-channels-export': ((), social_channels_export),
+    'social-channels-import': (('social-channels-export',), social_channels_import),
     # A tuple inside `requires` lists alternatives: either cutover procedure makes Organizations authoritative.
     # Organization Calling / Messaging need the automatic bindings (ADR 0058 Amendment A2).
     'activate-enterprise-calling': ((('org-cutover-authoritative', 'org-cutover-first-activation'),

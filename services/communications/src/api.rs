@@ -30,6 +30,10 @@ pub fn app(state: State) -> Router {
             post(contact_names),
         )
         .route(
+            "/internal/v1/communications/contacts/eligible",
+            post(eligible_contacts),
+        )
+        .route(
             "/internal/v1/communications/policy/check",
             post(policy_check),
         )
@@ -291,6 +295,76 @@ async fn contact_names(
         })
         .collect();
     Ok(Json(json!({"schemaVersion":1,"principals":principals})))
+}
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EligibleContacts {
+    actor_principal_id: Uuid,
+    #[serde(default)]
+    principal_ids: Option<Vec<Uuid>>,
+}
+/// At most this many principals per filtered eligibility lookup.
+pub const MAX_ELIGIBLE_FILTER: usize = 256;
+/// At most this many contacts per unfiltered eligibility answer.
+pub const MAX_ELIGIBLE_CONTACTS: i64 = 5000;
+/// Mutual, unblocked contacts of the actor (Messaging only, status audiences).
+///
+/// A contact is eligible only while the pair's connection is CONNECTED, BOTH people hold
+/// the contact in their own contact list, both profiles are ACTIVE and no block is active
+/// in either direction (any source: Communications, Calling or Messaging). One-way
+/// requests, shared groups, organizations, exchanged messages or a known CF Meet ID never
+/// count. `eligibleSince` is the latest of the connection time and the last block change of
+/// the pair: the owner (Messaging) never shows a status published before it, so removing
+/// and re-adding a contact, or blocking and unblocking, never restores access to older
+/// statuses. With `principalIds` only those principals are considered; the actor itself
+/// and unknown ids are left out without an error.
+async fn eligible_contacts(
+    HttpState(s): HttpState<State>,
+    Extension(ctx): Extension<InternalServiceContext>,
+    Json(input): Json<EligibleContacts>,
+) -> Result<Json<Value>> {
+    if ctx.authenticated_service() != &cf_service_auth::ServiceId::messaging() {
+        return Err(Error::Forbidden);
+    }
+    if input
+        .principal_ids
+        .as_ref()
+        .is_some_and(|p| p.len() > MAX_ELIGIBLE_FILTER)
+    {
+        return Err(Error::Validation);
+    }
+    s.metrics.requests.fetch_add(1, Ordering::Relaxed);
+    let scope = auth::delegated(&ctx)?;
+    auth::validate_scope(&s, &scope).await?;
+    let sc = cf_communications_policy::Scope::of(&scope);
+    let actor = match s
+        .store
+        .principal(&s.store.db, sc, input.actor_principal_id)
+        .await
+    {
+        Ok(p) => p,
+        Err(Error::NotFound) => return Ok(Json(json!({"schemaVersion":1,"contacts":[]}))),
+        Err(e) => return Err(e),
+    };
+    if actor.activation_state != Activation::Active
+        || input.principal_ids.as_ref().is_some_and(|p| p.is_empty())
+    {
+        return Ok(Json(json!({"schemaVersion":1,"contacts":[]})));
+    }
+    let contacts: Vec<Value> = store::rows(
+        &s.store.db,
+        "SELECT jsonb_build_object('principalId',o.principal_id,'eligibleSince',greatest(c.connected_at,             (SELECT max(b.updated_at) FROM communication_block_bridge b               WHERE (b.blocker_profile_id=$1 AND b.blocked_profile_id=o.id) OR (b.blocker_profile_id=o.id AND b.blocked_profile_id=$1)))) doc            FROM communication_connections c            JOIN communication_profiles o ON o.id=CASE WHEN c.left_profile_id=$1 THEN c.right_profile_id ELSE c.left_profile_id END           WHERE (c.left_profile_id=$1 OR c.right_profile_id=$1) AND c.state='CONNECTED' AND c.connected_at IS NOT NULL             AND o.tenant_id=$2 AND o.application_id=$3 AND o.environment_id=$4 AND o.activation_state='ACTIVE'             AND EXISTS (SELECT 1 FROM communication_contact_aliases a WHERE a.connection_id=c.id AND a.owner_profile_id=$1)             AND EXISTS (SELECT 1 FROM communication_contact_aliases a WHERE a.connection_id=c.id AND a.owner_profile_id=o.id)             AND NOT EXISTS (SELECT 1 FROM communication_block_bridge b WHERE b.active                 AND ((b.blocker_profile_id=$1 AND b.blocked_profile_id=o.id) OR (b.blocker_profile_id=o.id AND b.blocked_profile_id=$1)))             AND ($5::jsonb IS NULL OR o.principal_id IN (SELECT jsonb_array_elements_text($5::jsonb)::uuid))           ORDER BY o.principal_id LIMIT $6",
+        vec![
+            actor.id.into(),
+            sc.tenant_id.into(),
+            sc.application_id.into(),
+            sc.environment_id.into(),
+            input.principal_ids.map(|p| json!(p)).into(),
+            MAX_ELIGIBLE_CONTACTS.into(),
+        ],
+    )
+    .await?;
+    Ok(Json(json!({"schemaVersion":1,"contacts":contacts})))
 }
 /// A private translation for authoritative owners; consumer discovery never exposes it.
 async fn resolve_principal(

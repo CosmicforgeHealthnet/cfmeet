@@ -110,6 +110,11 @@ pub struct AuthPolicy {
     /// ACC-026: how recent a sign-in counts as re-authentication
     /// (`ACCOUNT_REAUTH_MAX_AGE_SECS`, default 600, bounded 60-3600).
     pub reauth_max_age_secs: i64,
+    /// ADR 0070: how long after a rotation the refresh token it superseded is still
+    /// accepted as a benign retry or race (`ACCOUNT_REFRESH_REUSE_GRACE_SECONDS`, default
+    /// 60, bounded 0-300; 0 = strict single use). Within the window the superseded token
+    /// is answered with tokens for the session's current refresh id, without rotating.
+    pub refresh_reuse_grace_secs: i64,
     /// ACC-016 (OWNER_DECISION): where an unverified email address is refused
     /// (`EMAIL_VERIFICATION_ENFORCEMENT`, default `off` = behaviour unchanged). Effective
     /// only while `EMAIL_VERIFICATION_REQUIRED` is true.
@@ -155,6 +160,10 @@ impl EmailVerificationEnforcement {
 
 /// Default and bounds of the recent-sign-in window (ACC-026).
 pub const DEFAULT_REAUTH_MAX_AGE_SECS: i64 = 600;
+
+/// Default and upper bound of the refresh-token reuse grace window (ADR 0070).
+pub const DEFAULT_REFRESH_REUSE_GRACE_SECS: i64 = 60;
+pub const MAX_REFRESH_REUSE_GRACE_SECS: i64 = 300;
 
 /// Wire format of the account status on the v1 sign-in responses (ACC-022).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -239,6 +248,10 @@ impl AuthPolicy {
             .and_then(|v| v.trim().parse::<i64>().ok())
             .unwrap_or(DEFAULT_REAUTH_MAX_AGE_SECS)
             .clamp(60, 3600);
+        let refresh_reuse_grace_secs = get("ACCOUNT_REFRESH_REUSE_GRACE_SECONDS")
+            .and_then(|v| v.trim().parse::<i64>().ok())
+            .unwrap_or(DEFAULT_REFRESH_REUSE_GRACE_SECS)
+            .clamp(0, MAX_REFRESH_REUSE_GRACE_SECS);
         let email_verification_enforcement = match get("EMAIL_VERIFICATION_ENFORCEMENT")
             .unwrap_or_default()
             .trim()
@@ -272,6 +285,7 @@ impl AuthPolicy {
             status_format,
             deactivation_requires_reauth,
             reauth_max_age_secs,
+            refresh_reuse_grace_secs,
             email_verification_enforcement,
         }
     }
@@ -910,6 +924,12 @@ pub async fn start_session(
 
 /// Rotate a session's refresh token. Presenting a superseded refresh token revokes the
 /// whole session (reuse detection) and is audited.
+///
+/// ADR 0070 grace window: the refresh token superseded by the LAST rotation, presented
+/// within `refresh_reuse_grace_secs` of it, is a lost response or a race between two
+/// refreshes of the same client, not theft. It is answered with tokens for the session's
+/// current refresh id without rotating again (which would make the other racer stale),
+/// and without revoking, emailing or fanning out. Anything older, or later, is reuse.
 pub async fn rotate_session(
     state: &AppState,
     claims: &Claims,
@@ -930,11 +950,16 @@ pub async fn rotate_session(
     let row = txn
         .query_one(Statement::from_sql_and_values(
             DbBackend::Postgres,
-            "SELECT user_id, current_refresh_id, \
+            "SELECT user_id, current_refresh_id, previous_refresh_id, \
                     floor(extract(epoch FROM authenticated_at))::bigint AS auth_time, \
-                    revoked_at IS NULL AND absolute_expires_at > now() AS open \
+                    revoked_at IS NULL AND absolute_expires_at > now() AS open, \
+                    COALESCE(last_refreshed_at > now() - make_interval(secs => $2::double precision), \
+                             false) AS within_grace \
              FROM account_sessions WHERE id = $1 FOR UPDATE",
-            [session_id.into()],
+            [
+                session_id.into(),
+                (state.auth_policy.refresh_reuse_grace_secs as f64).into(),
+            ],
         ))
         .await?
         .ok_or_else(revoked)?;
@@ -942,8 +967,35 @@ pub async fn rotate_session(
     let current: Uuid = row.try_get("", "current_refresh_id")?;
     let session_auth_time: i64 = row.try_get("", "auth_time")?;
     let open: bool = row.try_get("", "open")?;
+    let previous: Option<Uuid> = row.try_get("", "previous_refresh_id")?;
+    let within_grace: bool = row.try_get("", "within_grace")?;
     if owner != user.id || !open {
         return Err(revoked());
+    }
+    // ADR 0070: a retry or race of the last rotation. The row is left untouched, so every
+    // client converges on the same current refresh token.
+    if state.auth_policy.refresh_reuse_grace_secs > 0
+        && within_grace
+        && presented.is_some()
+        && presented == previous
+    {
+        record_event(
+            &txn,
+            SecurityEvent::new("REFRESH_TOKEN_GRACE_REUSE", Outcome::Success)
+                .user(user.id)
+                .session(session_id)
+                .actor(ActorKind::Anonymous, None),
+        )
+        .await?;
+        txn.commit().await?;
+        tracing::info!(%session_id, "superseded refresh token retried within the grace window");
+        return state.jwt_service.session_tokens(
+            user.id,
+            &role_claim(user),
+            claims.auth_time.unwrap_or(session_auth_time),
+            session_id,
+            current,
+        );
     }
     if presented != Some(current) {
         txn.execute(Statement::from_sql_and_values(
@@ -984,8 +1036,8 @@ pub async fn rotate_session(
     let next = Uuid::new_v4();
     txn.execute(Statement::from_sql_and_values(
         DbBackend::Postgres,
-        "UPDATE account_sessions SET current_refresh_id = $2, \
-                refresh_generation = refresh_generation + 1, last_refreshed_at = now() \
+        "UPDATE account_sessions SET previous_refresh_id = current_refresh_id, \
+                current_refresh_id = $2, refresh_generation = refresh_generation + 1, last_refreshed_at = now() \
          WHERE id = $1",
         [session_id.into(), next.into()],
     ))
@@ -1483,6 +1535,18 @@ mod tests {
         let d = AuthPolicy::default();
         assert!(d.deactivation_requires_reauth);
         assert_eq!(d.reauth_max_age_secs, DEFAULT_REAUTH_MAX_AGE_SECS);
+        assert_eq!(d.refresh_reuse_grace_secs, DEFAULT_REFRESH_REUSE_GRACE_SECS);
+        let grace = |v: &'static str| {
+            AuthPolicy::from_lookup(|k| {
+                (k == "ACCOUNT_REFRESH_REUSE_GRACE_SECONDS").then(|| v.to_string())
+            })
+            .refresh_reuse_grace_secs
+        };
+        assert_eq!(grace("0"), 0, "0 restores strict single use");
+        assert_eq!(grace(" 90 "), 90);
+        assert_eq!(grace("100000"), MAX_REFRESH_REUSE_GRACE_SECS, "clamped");
+        assert_eq!(grace("-5"), 0, "clamped");
+        assert_eq!(grace("soon"), DEFAULT_REFRESH_REUSE_GRACE_SECS);
         assert_eq!(
             d.email_verification_enforcement,
             EmailVerificationEnforcement::Off

@@ -191,8 +191,11 @@ pub async fn expire_unlinked(state: &AppState, batch: i64) -> Result<usize> {
     let due: Vec<AttachmentRow> = db::all(
         &state.db,
         &format!(
-            "SELECT {ATTACHMENT_COLUMNS} FROM messaging_attachments WHERE state = 'READY' AND message_id IS NULL \
-               AND state_changed_at <= $1 ORDER BY state_changed_at LIMIT $2"
+            "SELECT {ATTACHMENT_COLUMNS} FROM messaging_attachments a WHERE state = 'READY' AND message_id IS NULL \
+               AND state_changed_at <= $1 \
+               AND NOT EXISTS (SELECT 1 FROM messaging_conversations c WHERE c.id = a.conversation_id \
+                    AND c.avatar_ref = 'attachment:' || a.id::text) \
+               ORDER BY state_changed_at LIMIT $2"
         ),
         vec![cutoff.into(), batch.into()],
     )
@@ -218,7 +221,8 @@ pub async fn expire_unlinked(state: &AppState, batch: i64) -> Result<usize> {
 /// MANAGED media is kept on the server only as a delivery copy (product decision,
 /// 26 November 2026): once `managed_media_retention` has passed since upload, the
 /// attachment is deleted and its object queued for removal (a legal hold keeps it).
-/// The message itself stays; PRIVATE_E2EE attachments are not touched.
+/// The message itself stays; PRIVATE_E2EE attachments are not touched, and neither is
+/// an image that is currently its group's photo (`avatarRef: attachment:<id>`).
 pub async fn expire_managed_media(state: &AppState, batch: i64) -> Result<usize> {
     let Some(retention) = state.attachments.managed_media_retention else {
         return Ok(0);
@@ -227,7 +231,11 @@ pub async fn expire_managed_media(state: &AppState, batch: i64) -> Result<usize>
     let due: Vec<AttachmentRow> = db::all(
         &state.db,
         &format!(
-            "SELECT {ATTACHMENT_COLUMNS} FROM messaging_attachments WHERE state = 'READY' AND security_profile = 'MANAGED'                AND message_id IS NOT NULL AND state_changed_at <= $1 ORDER BY state_changed_at LIMIT $2"
+            "SELECT {ATTACHMENT_COLUMNS} FROM messaging_attachments a WHERE state = 'READY' AND security_profile = 'MANAGED' \
+               AND message_id IS NOT NULL AND state_changed_at <= $1 \
+               AND NOT EXISTS (SELECT 1 FROM messaging_conversations c WHERE c.id = a.conversation_id \
+                    AND c.avatar_ref = 'attachment:' || a.id::text) \
+               ORDER BY state_changed_at LIMIT $2"
         ),
         vec![cutoff.into(), batch.into()],
     )

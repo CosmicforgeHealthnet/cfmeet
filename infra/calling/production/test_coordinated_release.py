@@ -5,6 +5,7 @@ import io
 import json
 import os
 import re
+import stat
 import tempfile
 import subprocess
 import unittest
@@ -1426,6 +1427,194 @@ class OwnerDeliveredLinks(unittest.TestCase):
 
 
 ORIGINAL_SEALED = cr._sealed
+
+
+class SocialChannelsCopy(unittest.TestCase):
+    """ADR 0069 "Rollout" 2, in the style of org-cutover-export / org-cutover-import: the Meeting
+    backend image exports, messaging-admin imports twice (all unchanged), the snapshot is shredded."""
+
+    SCOPE = {'CFMEET_COMMUNICATION_TENANT_ID': 't', 'CFMEET_COMMUNICATION_APPLICATION_ID': 'a',
+             'CFMEET_COMMUNICATION_ENVIRONMENT_ID': 'env-1'}
+    COUNTS = {'channels': 2, 'followers': 3, 'posts': 4, 'reactions': 1, 'media': 1}
+    ZERO = dict.fromkeys(COUNTS, 0)
+
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.addCleanup(self.folder.cleanup)
+        root = Path(self.folder.name)
+        self.emitted, self.recorded = [], []
+        for target, value in (('WORK', root), ('SOCIAL_COPY', root / 'social-channels'),
+                              ('emit', lambda kind, value: self.emitted.append((kind, value))),
+                              ('record_step', lambda op, sha, run_id: self.recorded.append(op))):
+            patcher = patch.object(cr, target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def export_doc(self, environment='env-1'):
+        return {'schemaVersion': 1, 'scope': {'environmentId': environment}, 'channels': [{'name': 'secret'}],
+                'counts': self.COUNTS, 'skipped': {'unlinkedPeople': 1}, 'checksum': 'c' * 64}
+
+    def export(self, doc=None, returncode=0, env=None):
+        calls, env_values = [], []
+        real_env_file = cr.release.env_file
+
+        def env_file(path, values):
+            env_values.append(dict(values))
+            return real_env_file(path, values)
+
+        def docker(args, stdout=None, **kwargs):
+            calls.append(args)
+            self.assertTrue(Path(args[args.index('--env-file') + 1]).exists())
+            stdout.write(json.dumps(doc or self.export_doc()).encode())
+            return subprocess.CompletedProcess(args, returncode, b'', b'boom postgres://u:pw@db/x')
+
+        meeting = {'Image': 'sha256:meeting', 'env': dict(DATABASE_URL='postgres://u:pw@db/m', OTHER='x',
+                                                          **(self.SCOPE if env is None else env))}
+        with patch.object(cr.p, 'inspect', lambda name: meeting), patch.object(cr.p, 'env_of', lambda c: c['env']), \
+                patch.object(cr.release, 'env_file', env_file), patch.object(cr.subprocess, 'run', docker):
+            summary = cr.social_channels_export(SHA, '7-1', '')
+        return summary, calls, env_values
+
+    def test_steps_follow_each_other_and_are_offered(self):
+        self.assertEqual(cr.ACTIVATIONS['social-channels-export'][0], ())
+        self.assertEqual(cr.ACTIVATIONS['social-channels-import'][0], ('social-channels-export',))
+        self.assertIn('social-channels-export', cr.OPERATIONS)
+        self.assertIn('social-channels-import', cr.OPERATIONS)
+
+    def test_dispatcher_requires_the_backend_release_and_the_export_first(self):
+        order = []
+        with patch.object(cr, 'load_journal', lambda: []), patch.object(cr.p, 'identity', lambda: None), \
+                patch.object(cr, 'require_release', lambda sha: order.append('release')), \
+                patch.dict(cr.ACTIVATIONS, {'social-channels-export': ((), lambda *a: order.append('export'))}), \
+                patch.object(cr.Path, 'mkdir', lambda *a, **k: None):
+            cr.run('social-channels-export', SHA, '5-1')
+            self.assertEqual(order, ['release', 'export'])
+            with self.assertRaisesRegex(RuntimeError, 'complete social-channels-export first'):
+                cr.run('social-channels-import', SHA, '5-1')
+        with patch.object(cr, 'load_journal', lambda: []), patch.object(cr.p, 'identity', lambda: None), \
+                patch.object(cr, 'require_release', side_effect=RuntimeError('Activation requires a completed')), \
+                patch.object(cr.Path, 'mkdir', lambda *a, **k: None):
+            with self.assertRaisesRegex(RuntimeError, 'completed'):
+                cr.run('social-channels-export', SHA, '5-1')
+
+    def test_export_runs_the_meeting_image_with_only_its_scope_and_reports_counts_only(self):
+        summary, calls, env_values = self.export()
+        args = calls[0]
+        self.assertEqual(args[args.index('--network') + 1], 'container:' + cr.MEETING)
+        self.assertEqual(args[args.index('--entrypoint') + 1], '/app/export-social-channels')
+        self.assertEqual(args[-1], 'sha256:meeting')
+        self.assertEqual(set(env_values[0]), {'DATABASE_URL'} | set(self.SCOPE))
+        self.assertFalse((cr.WORK / 'run' / 'social-export.env').exists())
+        out = Path(summary['file'])
+        if os.name == 'posix':
+            self.assertEqual(stat.S_IMODE(out.stat().st_mode) & 0o077, 0)
+        self.assertEqual(self.recorded, ['social-channels-export'])
+        kind, value = self.emitted[0]
+        self.assertEqual(kind, 'socialChannelsExport')
+        self.assertNotIn('file', value)
+        self.assertNotIn('secret', json.dumps(value))
+        self.assertEqual(value['counts'], self.COUNTS)
+        latest = json.loads((cr.SOCIAL_COPY / 'latest-export.json').read_text())
+        self.assertEqual((latest['file'], latest['environmentId']), (str(out), 'env-1'))
+
+    def test_failed_or_foreign_exports_are_shredded_and_recorded_nowhere(self):
+        with self.assertRaisesRegex(RuntimeError, 'export failed') as caught:
+            self.export(returncode=4)
+        self.assertNotIn('pw@', str(caught.exception))
+        with self.assertRaisesRegex(RuntimeError, 'not of the CF Meet communication environment'):
+            self.export(doc=self.export_doc('other'))
+        with self.assertRaisesRegex(RuntimeError, 'CFMEET_COMMUNICATION_ENVIRONMENT_ID'):
+            self.export(env={k: v for k, v in self.SCOPE.items() if 'ENVIRONMENT' not in k})
+        self.assertEqual(list(cr.SOCIAL_COPY.rglob('*.json')), [])
+        self.assertEqual((self.recorded, self.emitted), ([], []))
+
+    def report(self, imported, unchanged, refused=0):
+        return {'imported': imported, 'unchanged': unchanged,
+                'refused': [{'kind': 'post', 'id': 'x', 'reason': 'INVALID'}] * refused}
+
+    def run_import(self, reports, confirm=''):
+        summary, _, _ = self.export()
+        seen = []
+
+        def fake(path, environment, operator):
+            seen.append((Path(path).exists(), environment, operator))
+            return reports[len(seen) - 1]
+
+        with patch.object(cr, 'messaging_social_import', fake):
+            try:
+                cr.social_channels_import(SHA, '7-1', confirm)
+            finally:
+                self.assertFalse(Path(summary['file']).exists(), 'snapshot not shredded')
+        return seen
+
+    def test_import_twice_all_unchanged_then_shred(self):
+        seen = self.run_import([self.report(self.COUNTS, self.ZERO), self.report(self.ZERO, self.COUNTS)])
+        self.assertEqual(seen, [(True, 'env-1', 'coordinated-release:7-1')] * 2)
+        self.assertEqual(self.recorded, ['social-channels-export', 'social-channels-import'])
+        self.assertEqual([k for k, _ in self.emitted], ['socialChannelsExport', 'socialChannelsImport',
+                                                        'socialChannelsImportRepeat'])
+        self.assertTrue((cr.SOCIAL_COPY / 'latest-import.json').exists())
+        with self.assertRaisesRegex(RuntimeError, 'already consumed; run social-channels-export again'):
+            cr.social_channels_import(SHA, '7-2', '')
+
+    def test_a_repeat_that_is_not_fully_unchanged_fails_the_step(self):
+        partly = dict(self.ZERO, posts=1)
+        for second in (self.report(partly, dict(self.COUNTS, posts=3)),       # imported again
+                       self.report(self.ZERO, dict(self.COUNTS, media=0)),    # a record went missing
+                       self.report(self.ZERO, self.COUNTS, refused=1)):       # refusals changed
+            self.recorded.clear()
+            with self.assertRaisesRegex(RuntimeError, 'not fully unchanged'):
+                self.run_import([self.report(self.COUNTS, self.ZERO), second])
+            self.assertEqual(self.recorded, ['social-channels-export'])
+
+    def test_refusals_need_the_owner_decision(self):
+        refused = self.report(dict(self.COUNTS, posts=3), self.ZERO, refused=1)
+        with self.assertRaisesRegex(RuntimeError, 'refusals-accepted'):
+            self.run_import([refused])  # the repeat never runs; the snapshot is still shredded
+        self.assertNotIn('social-channels-import', self.recorded)
+        self.recorded.clear()
+        seen = self.run_import([refused, self.report(self.ZERO, dict(self.COUNTS, posts=3), refused=1)],
+                               confirm='refusals-accepted')
+        self.assertEqual(len(seen), 2)
+        self.assertIn('social-channels-import', self.recorded)
+
+    def test_messaging_admin_runs_in_the_messaging_container_on_stdin(self):
+        snapshot = Path(self.folder.name) / 's.json'
+        snapshot.write_text('{}')
+        calls = []
+
+        def run_binary(args, stdin_path=None, **kwargs):
+            calls.append((args, stdin_path))
+            return json.dumps(self.report(self.ZERO, self.COUNTS)).encode()
+
+        with patch.object(cr, 'run_binary', run_binary):
+            cr.messaging_social_import(snapshot, 'env-1', 'coordinated-release:7-1')
+        args, stdin_path = calls[0]
+        self.assertEqual(args[:5], ['docker', 'exec', '-i', cr.SERVICES['messaging']['container'],
+                                    '/app/messaging-admin'])
+        self.assertEqual(args[5:], ['social', 'import-channels', '--file', '-', '--environment', 'env-1',
+                                    '--operator', 'coordinated-release:7-1'])
+        self.assertEqual(stdin_path, snapshot)
+        self.assertNotIn('-v', args)
+
+    def test_shred_overwrites_then_removes_and_is_idempotent(self):
+        target = Path(self.folder.name) / 'x.json'
+        target.write_bytes(b'post text' * 1000)
+        written = []
+        real_open = open
+
+        def spy(path, mode='r', *a, **k):
+            f = real_open(path, mode, *a, **k)
+            if mode == 'r+b':
+                write = f.write
+                f.write = lambda b: (written.append(bytes(b)), write(b))[1]
+            return f
+
+        with patch('builtins.open', spy):
+            cr.shred(target)
+        self.assertFalse(target.exists())
+        self.assertEqual(b''.join(written), b'\0' * 9000)
+        cr.shred(target)
 
 
 class PublicInternalDenial(unittest.TestCase):

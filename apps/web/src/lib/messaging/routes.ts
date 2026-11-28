@@ -6,7 +6,12 @@ const page = ["limit", "cursor"];
 const conversations = ["lifecycleState", "contextClass", "limit", "cursor", "orderBy"];
 const messages = ["afterSequence", "beforeSequence", "limit", "threadRootId"];
 const c = `conversations/${id}`;
-const routes: [MessagingMethod, string, readonly string[]][] = [
+const st = "messaging/status";
+const ch = "messaging/channels";
+/** A media part number (0-63, canonical decimal). */
+const part = "(?:[0-9]|[1-5][0-9]|6[0-3])";
+type Route = [MessagingMethod, string, readonly string[]];
+const routes: Route[] = [
   ["GET", "conversations", conversations], ["POST", "conversations", []],
   ["GET", c, []], ["PATCH", c, []],
   ["POST", `${c}/messages/${id}/forward`, []],
@@ -22,6 +27,11 @@ const routes: [MessagingMethod, string, readonly string[]][] = [
   ["PUT", `${c}/messages/${id}/reactions/${reaction}`, []], ["DELETE", `${c}/messages/${id}/reactions/${reaction}`, []],
   ["GET", `${c}/pins`, []], ["PUT", `${c}/pins/${id}`, []], ["DELETE", `${c}/pins/${id}`, []],
   ["PUT", `${c}/read-cursor`, []], ["PUT", `${c}/inbox-settings`, []], ["POST", `${c}/owner`, []], ["GET", `${c}/unread`, []],
+  // The member's own chat lists and MANAGED polls (Messaging owns both).
+  ["GET", "messaging/chat-lists", []], ["POST", "messaging/chat-lists", []],
+  ["PATCH", `messaging/chat-lists/${id}`, []], ["DELETE", `messaging/chat-lists/${id}`, []],
+  ["PUT", `messaging/chat-lists/${id}/conversations/${id}`, []], ["DELETE", `messaging/chat-lists/${id}/conversations/${id}`, []],
+  ["PUT", `${c}/messages/${id}/poll/vote`, []], ["POST", `${c}/messages/${id}/poll/close`, []],
   // Messaging's canonical replay cursor is `after` (the relay still rewrites the old
   // `afterEventSequence` spelling, MSG-001).
   ["GET", `${c}/events`, ["after", "afterEventSequence", "limit"]],
@@ -51,6 +61,25 @@ const routes: [MessagingMethod, string, readonly string[]][] = [
   ["GET", "messaging/push/configuration", []],
   ["POST", "messaging/backups", []], ["GET", "messaging/backups/latest", []], ["DELETE", `messaging/backups/${id}`, []],
   ["POST", `messaging/backups/${id}/finalize`, []], ["POST", `messaging/backups/${id}/download-grants`, []],
+  // ADR 0069: Status and Channels (owned by Messaging; Meeting only relays them).
+  ["POST", st, []], ...(["feed", "mine", "audience", "eligible-contacts", "close-friends", "audience-lists", "mutes"] as const).map((x) => ["GET", `${st}/${x}`, []] as Route),
+  ["POST", `${st}/delete`, []], ["POST", `${st}/rings`, []], ["POST", `${st}/audience-lists`, []],
+  ["PUT", `${st}/audience`, []], ["PUT", `${st}/close-friends`, []],
+  ["PATCH", `${st}/audience-lists/${id}`, []], ["DELETE", `${st}/audience-lists/${id}`, []],
+  ["PUT", `${st}/mutes/${id}`, []], ["DELETE", `${st}/mutes/${id}`, []],
+  ["GET", `${st}/${id}`, []], ["DELETE", `${st}/${id}`, []], ["POST", `${st}/${id}/view`, []],
+  ["PUT", `${st}/${id}/reaction`, []], ["DELETE", `${st}/${id}/reaction`, []], ["GET", `${st}/${id}/viewers`, []],
+  ["POST", `${st}/${id}/replies`, []], ["POST", `${st}/${id}/forwards`, []], ["POST", `${st}/${id}/reshares`, []],
+  ...[st, ch].flatMap((base) => [
+    ["POST", `${base}/media`, []], ["GET", `${base}/media/${id}`, []], ["DELETE", `${base}/media/${id}`, []],
+    ["POST", `${base}/media/${id}/parts/${part}`, []], ["POST", `${base}/media/${id}/complete`, []],
+    ["POST", `${base}/media/${id}/download-grants`, []],
+  ] as Route[]),
+  ["GET", ch, ["q"]], ["POST", ch, []], ["GET", `${ch}/following`, []],
+  ["GET", `${ch}/${id}`, []], ["PATCH", `${ch}/${id}`, []], ["DELETE", `${ch}/${id}`, []],
+  ["PUT", `${ch}/${id}/follow`, []], ["DELETE", `${ch}/${id}/follow`, []],
+  ["GET", `${ch}/${id}/posts`, ["before"]], ["POST", `${ch}/${id}/posts`, []],
+  ["DELETE", `${ch}/${id}/posts/${id}`, []], ["PUT", `${ch}/${id}/posts/${id}/reaction`, []], ["DELETE", `${ch}/${id}/posts/${id}/reaction`, []],
 ];
 
 /** Mirror Meeting's end-user allowlist (`relay.rs` ROUTES); the backend remains the authority. */

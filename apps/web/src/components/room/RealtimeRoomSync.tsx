@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRealtime } from "@/hooks/v2/useRealtime";
 import { conferenceKeys } from "@/hooks/v2/useConferences";
@@ -10,6 +10,7 @@ import { breakoutKeys } from "@/hooks/v2/useBreakouts";
 import { engagementKeys } from "@/hooks/v2/useEngagement";
 import type { ConferenceResponse, RealtimeEnvelope } from "@/types/v2";
 import { CAPTION_EVENT, MEDIA_MOVE_EVENT, emitNotice } from "./RoomLiveEvents";
+import { markRealtime } from "@/lib/realtime-health";
 
 export default function RealtimeRoomSync({ conferenceId }: { conferenceId: string }) {
   const queryClient = useQueryClient();
@@ -81,11 +82,16 @@ export default function RealtimeRoomSync({ conferenceId }: { conferenceId: strin
     void queryClient.invalidateQueries({ queryKey: engagementKeys.all });
   }, [conferenceId, queryClient]);
 
+  useEffect(() => () => markRealtime(conferenceId, false), [conferenceId]);
+
   useRealtime({
     conferenceId,
     enabled: !!conferenceId,
     onEvent: handleEvent,
     onCanonicalState: handleCanonicalState,
+    // While events flow, the room's polls slow to a safety net (lib/realtime-health).
+    onOpen: () => markRealtime(conferenceId, true),
+    onClose: () => markRealtime(conferenceId, false),
     onError: error => console.error("Conference realtime connection error:", error),
   });
 

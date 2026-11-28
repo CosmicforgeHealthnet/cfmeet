@@ -146,7 +146,7 @@ types in the apps is optional (PLT-013 handoff).
 | Verify email | `POST /api/v1/auth/verify-email`, `POST /api/v1/auth/resend-verification` | some features require a verified email (`EMAIL_VERIFICATION_REQUIRED`) |
 | Sign in | `POST /api/v1/auth/login` | returns `access_token` + `refresh_token`; opens an account session |
 | Google | `GET /api/v1/auth/oauth/google` → callback → app receives `?exchange_code=` → `POST /api/v1/auth/oauth/google/exchange` | redeem once, erase the query string first; tokens never travel in a URL |
-| Refresh | `POST /api/v1/auth/refresh` | **rotating**: each refresh token is single use; reuse ends the whole session |
+| Refresh | `POST /api/v1/auth/refresh` | **rotating**: each refresh token is single use; reuse ends the whole session. A retry of the token superseded by the last refresh within 60 s (a lost response, two racing refreshes) returns the current pair instead (ADR 0070); still keep refreshes single-flight |
 | Sign out | `POST /api/v1/auth/logout` | ends this session only |
 | Sessions | `GET /api/v2/me/sessions`, `POST /api/v2/me/sessions/{sessionId}/revoke`, `POST /api/v2/me/sessions/revoke-all` | "sign out everywhere" |
 | Password | `POST /api/v1/auth/forgot-password` → `verify-reset-token` → `reset-password`; `POST /api/v1/auth/change-password` | reset / change end every earlier session; responses never reveal whether an account exists |

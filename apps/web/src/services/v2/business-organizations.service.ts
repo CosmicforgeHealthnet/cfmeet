@@ -63,7 +63,28 @@ export interface OrganizationProvisioning {
 
 const org = (id: string) => `/organizations/${encodeURIComponent(id)}`;
 
+/** A pending invitation addressed to the signed-in account (CF Meet ID or verified email). */
+export interface MyOrganizationInvitation {
+  id: string;
+  organizationId: string;
+  organization?: { id: string; name: string; slug: string } | null;
+  role: string;
+  status: string;
+  inviteeEmailHint: string;
+  invitedBy: string | null;
+  createdAt: string;
+  expiresAt: string;
+}
+
 export const businessOrganizationsService = {
+  /** `GET /me/organization-invitations` — my pending invitations, newest first. */
+  myInvitations: async () => (await apiV2.get<{ items: MyOrganizationInvitation[] }>("/me/organization-invitations")).data.items ?? [],
+  /** Join with the invitation's role (no emailed link needed). */
+  acceptMyInvitation: async (invitationId: string) =>
+    (await apiV2.post(`/organization-invitations/${encodeURIComponent(invitationId)}/accept`, {})).data,
+  declineMyInvitation: async (invitationId: string) =>
+    (await apiV2.post(`/organization-invitations/${encodeURIComponent(invitationId)}/decline`, {})).data,
+
   /** `POST /organizations` — the caller becomes OWNER. `idempotencyKey` makes retries safe. */
   create: async (body: CreateBusinessOrganizationRequest, idempotencyKey: string) =>
     (await apiV2.post<BusinessOrganization>("/organizations", body, { headers: { "Idempotency-Key": idempotencyKey } })).data,

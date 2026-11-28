@@ -14,6 +14,7 @@ import type {
   ChatPolicyUpdateRequest,
   ReactionRequest,
 } from "@/types/v2";
+import { roomPoll } from "@/lib/realtime-health";
 
 // Query Keys
 export const collaborationKeys = {
@@ -37,7 +38,7 @@ export function useCollaborationState(conferenceId: string) {
     queryKey: collaborationKeys.state(conferenceId),
     queryFn: () => collaborationService.getState(conferenceId),
     enabled: !!conferenceId,
-    refetchInterval: 3000,
+    refetchInterval: roomPoll(conferenceId, 3000),
   });
 }
 
@@ -49,7 +50,7 @@ export function useMessages(conferenceId: string, query?: MessageListQuery, enab
     queryKey: collaborationKeys.messages(conferenceId, query),
     queryFn: () => collaborationService.getMessages(conferenceId, query),
     enabled: !!conferenceId && enabled,
-    refetchInterval: 2000,
+    refetchInterval: roomPoll(conferenceId, 2000),
   });
 }
 
@@ -67,7 +68,7 @@ export function useRaisedHands(conferenceId: string) {
     queryKey: collaborationKeys.raisedHands(conferenceId),
     queryFn: () => collaborationService.getRaisedHands(conferenceId),
     enabled: !!conferenceId,
-    refetchInterval: 2000,
+    refetchInterval: roomPoll(conferenceId, 2000),
   });
 }
 

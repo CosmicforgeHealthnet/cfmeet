@@ -17710,8 +17710,8 @@
         "tags": [
           "Messaging (v2)"
         ],
-        "summary": "Display names of the principals the caller can see (self, colleagues and connected contacts).",
-        "description": "Returns display names for up to 256 `principalIds`. Named are the caller's own principal, those of\nactive members of the caller's verified organizations, and the caller's connected personal\ncontacts (Communications Hub; the name the contact list shows, plus the caller's private `alias`\nwhen set). A pending, revoked or blocked contact and any other id are left out of the answer\nwithout an error. If the Hub cannot be reached, contacts are simply not named. Requires a bearer\nuser token whose revocation status could be checked and the Messaging integration enabled.",
+        "summary": "Display names of the principals the caller can see.",
+        "description": "Named: the caller, colleagues, connected contacts and the people in the chats listed in\n`conversationIds` (membership checked by Messaging as the caller).\n\nReturns display names for up to 256 `principalIds`. Named are the caller's own principal, those of\nactive members of the caller's verified organizations, and the caller's connected personal\ncontacts (Communications Hub; the name the contact list shows, plus the caller's private `alias`\nwhen set). A pending, revoked or blocked contact and any other id are left out of the answer\nwithout an error. If the Hub cannot be reached, contacts are simply not named. Requires a bearer\nuser token whose revocation status could be checked and the Messaging integration enabled.",
         "operationId": "v2_messaging_principal_names",
         "requestBody": {
           "content": {
@@ -37289,6 +37289,10 @@
     {
       "name": "Authentication",
       "description": "Passwordless sign-in and sign-up: request a 6-digit code by email (`POST /api/v1/auth/otp/request`), then verify the code or the one-click link from the same email. The first verification of a new address creates the account. Also token refresh, logout, Google sign-in and undoing an email change."
+    },
+    {
+      "name": "Updates (v2)",
+      "description": "WhatsApp-style Updates: status posts (text, photo, voice note or a video segment of at most 60 s) seen by your connected contacts for 24 hours and then deleted with their media, and channels people follow, post in and react to. Media is uploaded and read in 512 KiB pieces."
     },
     {
       "name": "Account profile (v2)",
