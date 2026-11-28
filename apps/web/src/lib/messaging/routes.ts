@@ -8,6 +8,7 @@ const messages = ["afterSequence", "beforeSequence", "limit", "threadRootId"];
 const c = `conversations/${id}`;
 const st = "messaging/status";
 const ch = "messaging/channels";
+const cm = "messaging/communities";
 /** A media part number (0-63, canonical decimal). */
 const part = "(?:[0-9]|[1-5][0-9]|6[0-3])";
 type Route = [MessagingMethod, string, readonly string[]];
@@ -80,6 +81,23 @@ const routes: Route[] = [
   ["PUT", `${ch}/${id}/follow`, []], ["DELETE", `${ch}/${id}/follow`, []],
   ["GET", `${ch}/${id}/posts`, ["before"]], ["POST", `${ch}/${id}/posts`, []],
   ["DELETE", `${ch}/${id}/posts/${id}`, []], ["PUT", `${ch}/${id}/posts/${id}/reaction`, []], ["DELETE", `${ch}/${id}/posts/${id}/reaction`, []],
+  // ADR 0073: Communities (owned by Messaging; Meeting only relays them).
+  ["GET", cm, page], ["POST", cm, []],
+  ["GET", `${cm}/invitations`, []], ["POST", `${cm}/invitations/${id}/accept`, []], ["POST", `${cm}/invitations/${id}/decline`, []],
+  ["POST", `${cm}/invite-links/preview`, []], ["POST", `${cm}/invite-links/join`, []],
+  ["GET", `${cm}/join-requests`, []], ["POST", `${cm}/join-requests/${id}/cancel`, []],
+  ["GET", `${cm}/preferences`, []], ["PUT", `${cm}/preferences`, []],
+  ["GET", `${cm}/${id}`, []], ["PATCH", `${cm}/${id}`, []], ["DELETE", `${cm}/${id}`, []],
+  ["POST", `${cm}/${id}/owner`, []], ["POST", `${cm}/${id}/leave`, []],
+  ["GET", `${cm}/${id}/members`, page], ["PUT", `${cm}/${id}/members/${id}/role`, []], ["DELETE", `${cm}/${id}/members/${id}`, []],
+  ["GET", `${cm}/${id}/bans`, []], ["POST", `${cm}/${id}/bans`, []], ["DELETE", `${cm}/${id}/bans/${id}`, []],
+  ["GET", `${cm}/${id}/invitations`, []], ["POST", `${cm}/${id}/invitations`, []], ["DELETE", `${cm}/${id}/invitations/${id}`, []],
+  ["GET", `${cm}/${id}/invite-links`, []], ["POST", `${cm}/${id}/invite-links`, []], ["POST", `${cm}/${id}/invite-links/${id}/revoke`, []],
+  ["GET", `${cm}/${id}/join-requests`, ["state", "limit", "cursor"]],
+  ["POST", `${cm}/${id}/join-requests/${id}/approve`, []], ["POST", `${cm}/${id}/join-requests/${id}/reject`, []],
+  ["GET", `${cm}/${id}/groups`, []], ["POST", `${cm}/${id}/groups`, []], ["POST", `${cm}/${id}/groups/link`, []],
+  ["PUT", `${cm}/${id}/groups/order`, []], ["PATCH", `${cm}/${id}/groups/${id}`, []], ["DELETE", `${cm}/${id}/groups/${id}`, []],
+  ["POST", `${cm}/${id}/groups/${id}/join`, []],
 ];
 
 /** Mirror Meeting's end-user allowlist (`relay.rs` ROUTES); the backend remains the authority. */
