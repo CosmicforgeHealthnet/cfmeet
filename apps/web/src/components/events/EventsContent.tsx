@@ -112,9 +112,16 @@ export default function EventsContent() {
       {notice ? <p className="mt-2 text-sm text-muted-foreground">{notice}</p> : null}
 
       {/* Views */}
-      <div role="tablist" aria-label="Events" className="no-scrollbar -mx-4 mt-5 flex gap-1 overflow-x-auto border-b border-border px-4 sm:mx-0 sm:px-0">
+      <div role="tablist" aria-label="Events" onKeyDown={(e) => {
+        // ← → move between the views (WAI-ARIA tabs).
+        if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+        const i = EVENT_VIEWS.findIndex((v) => v.value === view);
+        const next = EVENT_VIEWS[(i + (e.key === "ArrowRight" ? 1 : EVENT_VIEWS.length - 1)) % EVENT_VIEWS.length];
+        setView(next.value);
+        (e.currentTarget.querySelector(`[data-view="${next.value}"]`) as HTMLElement | null)?.focus();
+      }} className="no-scrollbar -mx-4 mt-5 flex gap-1 overflow-x-auto border-b border-border px-4 sm:mx-0 sm:px-0">
         {EVENT_VIEWS.map((v) => (
-          <button key={v.value} type="button" role="tab" aria-selected={view === v.value} onClick={() => setView(v.value)}
+          <button key={v.value} type="button" role="tab" data-view={v.value} aria-selected={view === v.value} tabIndex={view === v.value ? 0 : -1} onClick={() => setView(v.value)}
             className={cn("relative h-10 shrink-0 px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40", view === v.value ? "text-primary" : "text-muted-foreground hover:text-foreground")}>
             {v.label}
             {view === v.value ? <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-primary" /> : null}
