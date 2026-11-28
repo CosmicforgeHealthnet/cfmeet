@@ -17,9 +17,9 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 | Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.11.0 | 322 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.10.0 | 77 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.35.0 | 146 |
-| Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.25.0 | 168 |
+| Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.26.0 | 187 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.10.0 | 104 |
-| **Total** | | | **817** |
+| **Total** | | | **836** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -1000,7 +1000,7 @@ Contract `packages/contracts/calling/http/v1.openapi.json` version **1.35.0**; b
 
 ## Messaging (MANAGED and PRIVATE_E2EE)
 
-Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.25.0**; base URL env `NEXT_PUBLIC_MESSAGING_URL`. First-party clients go through the Meeting Service relay `/api/v2/messaging/relay/{path}` (personal) or `/api/v2/organizations/{id}/messaging/relay/{path}` (organization), then realtime with a session token -> ticket -> WebSocket.
+Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.26.0**; base URL env `NEXT_PUBLIC_MESSAGING_URL`. First-party clients go through the Meeting Service relay `/api/v2/messaging/relay/{path}` (personal) or `/api/v2/organizations/{id}/messaging/relay/{path}` (organization), then realtime with a session token -> ticket -> WebSocket.
 
 ### Blocked Users
 
@@ -1141,6 +1141,30 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.25.0**;
 | DELETE | `/v1/messaging/backups/{backupId}` | customer credential (server-side only); Messaging client token | delete Backup | 200, 400, 401, 403, 404, 429, 503 | — | `messaging/http/v1.openapi.json#deleteBackup` |
 | POST | `/v1/messaging/backups/{backupId}/download-grants` | customer credential (server-side only); Messaging client token | create Backup Download Grant | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#createBackupDownloadGrant` |
 | POST | `/v1/messaging/backups/{backupId}/finalize` | customer credential (server-side only); Messaging client token | finalize Backup | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#finalizeBackup` |
+
+### Events
+
+| Method | Path | Auth | Summary | Status | Error codes | Contract |
+|---|---|---|---|---|---|---|
+| GET | `/v1/messaging/events` | customer credential (server-side only) | List event occurrences | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listEvents` |
+| POST | `/v1/messaging/events` | customer credential (server-side only) | Create an event | 200, 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#createEvent` |
+| GET | `/v1/messaging/events/calendar` | customer credential (server-side only) | Export my events calendar | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#exportEventCalendar` |
+| POST | `/v1/messaging/events/media` | customer credential (server-side only) | Start an event cover upload | 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#createEventMedia` |
+| DELETE | `/v1/messaging/events/media/{mediaId}` | customer credential (server-side only) | Cancel an event cover upload | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#cancelEventMedia` |
+| GET | `/v1/messaging/events/media/{mediaId}` | customer credential (server-side only) | Get an event cover | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#getEventMedia` |
+| POST | `/v1/messaging/events/media/{mediaId}/complete` | customer credential (server-side only) | Complete an event cover upload | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#completeEventMedia` |
+| POST | `/v1/messaging/events/media/{mediaId}/download-grants` | customer credential (server-side only) | Read an event cover | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#grantEventMediaDownload` |
+| POST | `/v1/messaging/events/media/{mediaId}/parts/{part}` | customer credential (server-side only) | Upload an event cover part | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#uploadEventMediaPart` |
+| DELETE | `/v1/messaging/events/{eventId}` | customer credential (server-side only) | Delete an event | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#deleteEvent` |
+| GET | `/v1/messaging/events/{eventId}` | customer credential (server-side only) | Get an event | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#getEvent` |
+| PATCH | `/v1/messaging/events/{eventId}` | customer credential (server-side only) | Update an event | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#updateEvent` |
+| GET | `/v1/messaging/events/{eventId}/attendees` | customer credential (server-side only) | List event attendees | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listEventAttendees` |
+| POST | `/v1/messaging/events/{eventId}/cancel` | customer credential (server-side only) | Cancel an event | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#cancelEvent` |
+| GET | `/v1/messaging/events/{eventId}/ics` | customer credential (server-side only) | Export an event | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#exportEvent` |
+| POST | `/v1/messaging/events/{eventId}/invitations` | customer credential (server-side only) | Invite people to an event | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#inviteToEvent` |
+| DELETE | `/v1/messaging/events/{eventId}/invitations/{principalId}` | customer credential (server-side only) | Remove an event invitee | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#removeEventInvitee` |
+| PUT | `/v1/messaging/events/{eventId}/reminders` | customer credential (server-side only) | Set my event reminders | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#setEventReminders` |
+| PUT | `/v1/messaging/events/{eventId}/rsvp` | customer credential (server-side only) | Answer an event | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#respondToEvent` |
 
 ### Group Membership & Bans
 
