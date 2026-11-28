@@ -17,7 +17,8 @@
     "FIRST_PARTY_COMMUNICATIONS_HUB": "The CF Meet app's own Communications Hub (contacts, CF Meet ID / QR, timeline, activity, call history): account-session only, served on the first-party direct ingress (/api/v2/communications), never a partner API. Partners use the Messaging, Calling and Meetings APIs with a platform credential.",
     "FIRST_PARTY_APP_CONSENT": "The CF Meet app's own consent and connected-apps screens for CF Meet Apps (OAuth authorize context / decision, the account's and an organization's connected apps; ADR 0064): account session only, first-party direct ingress, never a partner route.",
     "FIRST_PARTY_IN_MEETING_APPS": "The CF Meet app's in-meeting app panel (list of installed apps with a meeting surface, short-lived app-context tokens; ADR 0065): account session or participant token, first-party direct ingress.",
-    "APP_CONTEXT_KEYS_DIRECT": "Public JWKS that verifies in-meeting app-context tokens (ADR 0065): anonymous, served directly by the Meeting Service at /api/v2/app-context-keys; apps fetch it without a credential."
+    "APP_CONTEXT_KEYS_DIRECT": "Public JWKS that verifies in-meeting app-context tokens (ADR 0065): anonymous, served directly by the Meeting Service at /api/v2/app-context-keys; apps fetch it without a credential.",
+    "FIRST_PARTY_STATUS_CHANNELS": "Status and Channels (ADR 0069) for the CF Meet apps' own signed-in users: audiences are the account's mutual Communications Hub contacts in CF Meet's personal scope, reached only through the Meeting Service relay; not offered to partner applications."
   },
   "operations": [
     {
@@ -2580,167 +2581,6 @@
       "domain": "meetings",
       "method": "GET",
       "path": "/api/v2/avatars/{avatarId}",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "POST",
-      "path": "/api/v2/social/media",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "GET",
-      "path": "/api/v2/social/media/{mediaId}",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "PUT",
-      "path": "/api/v2/social/media/{mediaId}/chunks/{seq}",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "GET",
-      "path": "/api/v2/social/media/{mediaId}/chunks/{seq}",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "POST",
-      "path": "/api/v2/social/media/{mediaId}/complete",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "POST",
-      "path": "/api/v2/social/status",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "GET",
-      "path": "/api/v2/social/status/feed",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "DELETE",
-      "path": "/api/v2/social/status/{postId}",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "POST",
-      "path": "/api/v2/social/status/{postId}/view",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "GET",
-      "path": "/api/v2/social/status/{postId}/viewers",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "GET",
-      "path": "/api/v2/social/channels",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "POST",
-      "path": "/api/v2/social/channels",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "GET",
-      "path": "/api/v2/social/channels/following",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "GET",
-      "path": "/api/v2/social/channels/{channelId}",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "PATCH",
-      "path": "/api/v2/social/channels/{channelId}",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "DELETE",
-      "path": "/api/v2/social/channels/{channelId}",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "PUT",
-      "path": "/api/v2/social/channels/{channelId}/follow",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "DELETE",
-      "path": "/api/v2/social/channels/{channelId}/follow",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "GET",
-      "path": "/api/v2/social/channels/{channelId}/posts",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "POST",
-      "path": "/api/v2/social/channels/{channelId}/posts",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "DELETE",
-      "path": "/api/v2/social/channels/{channelId}/posts/{postId}",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "PUT",
-      "path": "/api/v2/social/channels/{channelId}/posts/{postId}/reaction",
-      "class": "EXCLUDED",
-      "reason": "FIRST_PARTY_APP_ACCOUNT"
-    },
-    {
-      "domain": "meetings",
-      "method": "DELETE",
-      "path": "/api/v2/social/channels/{channelId}/posts/{postId}/reaction",
       "class": "EXCLUDED",
       "reason": "FIRST_PARTY_APP_ACCOUNT"
     },
@@ -5538,6 +5378,363 @@
       "method": "POST",
       "path": "/v1/environments/{environmentId}/credential-deliveries/{deliveryRef}/reveal",
       "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/status",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/status/feed",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/status/mine",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/status/delete",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/status/rings",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/status/audience",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "PUT",
+      "path": "/v1/messaging/status/audience",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/status/eligible-contacts",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/status/close-friends",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "PUT",
+      "path": "/v1/messaging/status/close-friends",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/status/audience-lists",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/status/audience-lists",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "PATCH",
+      "path": "/v1/messaging/status/audience-lists/{listId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "DELETE",
+      "path": "/v1/messaging/status/audience-lists/{listId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/status/mutes",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "PUT",
+      "path": "/v1/messaging/status/mutes/{principalId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "DELETE",
+      "path": "/v1/messaging/status/mutes/{principalId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/status/media",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/status/media/{mediaId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "DELETE",
+      "path": "/v1/messaging/status/media/{mediaId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/status/media/{mediaId}/parts/{part}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/status/media/{mediaId}/complete",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/status/media/{mediaId}/download-grants",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/channels/media",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/channels/media/{mediaId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "DELETE",
+      "path": "/v1/messaging/channels/media/{mediaId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/channels/media/{mediaId}/parts/{part}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/channels/media/{mediaId}/complete",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/channels/media/{mediaId}/download-grants",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/status/{statusId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "DELETE",
+      "path": "/v1/messaging/status/{statusId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/status/{statusId}/view",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "PUT",
+      "path": "/v1/messaging/status/{statusId}/reaction",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "DELETE",
+      "path": "/v1/messaging/status/{statusId}/reaction",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/status/{statusId}/viewers",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/status/{statusId}/replies",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/status/{statusId}/forwards",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/status/{statusId}/reshares",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/channels",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/channels",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/channels/following",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/channels/{channelId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "PATCH",
+      "path": "/v1/messaging/channels/{channelId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "DELETE",
+      "path": "/v1/messaging/channels/{channelId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "PUT",
+      "path": "/v1/messaging/channels/{channelId}/follow",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "DELETE",
+      "path": "/v1/messaging/channels/{channelId}/follow",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/channels/{channelId}/posts",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/channels/{channelId}/posts",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "DELETE",
+      "path": "/v1/messaging/channels/{channelId}/posts/{postId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "PUT",
+      "path": "/v1/messaging/channels/{channelId}/posts/{postId}/reaction",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
+    },
+    {
+      "domain": "messaging",
+      "method": "DELETE",
+      "path": "/v1/messaging/channels/{channelId}/posts/{postId}/reaction",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_STATUS_CHANNELS"
     }
   ]
 }

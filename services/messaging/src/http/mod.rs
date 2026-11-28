@@ -51,6 +51,8 @@ pub fn customer_routes() -> Router<AppState> {
         .merge(crate::usage::http::routes())
         .merge(crate::backups::routes())
         .merge(crate::membership::http::customer_routes())
+        // ADR 0069: Status and Channels.
+        .merge(crate::social::http::routes())
         .merge(crate::conversations::chat_lists::routes())
 }
 

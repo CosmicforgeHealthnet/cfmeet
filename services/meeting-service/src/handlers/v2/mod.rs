@@ -27,7 +27,6 @@ pub mod organizations;
 pub mod participants;
 pub mod quality;
 pub mod realtime;
-pub mod social;
 pub mod spaces;
 pub mod specialized;
 pub mod unified_messaging;
