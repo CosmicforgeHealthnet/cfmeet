@@ -771,6 +771,39 @@ const MSG_DELETION: &[OutField] = &[
     o("created_at", "createdAt", Out::Time, false),
 ];
 
+// ADR 0072: channel verification and moderation (all R3, versioned).
+const MSG_CHANNEL_DECIDED: &[OutField] = &[
+    o("application_id", "applicationId", Out::Uuid, false),
+    o("channel_id", "channelId", Out::Uuid, false),
+    o("verification_state", "verificationState", Out::Code, false),
+    o("verified", "verified", Out::Bool, false),
+    o("decided_at", "decidedAt", Out::Time, false),
+];
+const MSG_CHANNEL_REVOKED: &[OutField] = &[
+    o("channel_id", "channelId", Out::Uuid, false),
+    o("verification_state", "verificationState", Out::Code, false),
+    o("verified", "verified", Out::Bool, false),
+    o("changed_at", "changedAt", Out::Time, false),
+];
+const MSG_CHANNEL_MODERATED: &[OutField] = &[
+    o("channel_id", "channelId", Out::Uuid, false),
+    o("moderation_state", "moderationState", Out::Code, false),
+    o("moderation_reason", "moderationReason", Out::Code, true),
+    o("changed_at", "changedAt", Out::Time, false),
+];
+const MSG_CHANNEL_TAKEN_DOWN: &[OutField] = &[
+    o("channel_id", "channelId", Out::Uuid, false),
+    o("post_id", "postId", Out::Uuid, false),
+    o("taken_down_at", "takenDownAt", Out::Time, false),
+];
+const MSG_CHANNEL_REPORT_RESOLVED: &[OutField] = &[
+    o("report_id", "reportId", Out::Uuid, false),
+    o("channel_id", "channelId", Out::Uuid, false),
+    o("post_id", "postId", Out::Uuid, true),
+    o("report_status", "reportStatus", Out::Code, false),
+    o("resolved_at", "resolvedAt", Out::Time, false),
+];
+
 #[allow(clippy::too_many_arguments)]
 const fn mg(
     id: &'static str,
@@ -1891,6 +1924,81 @@ pub const COMMANDS: &[OwnerCommand] = &[
         MSG_RESTRICTED,
         "MessagingConversationRestrictRequest",
         "MessagingConversationRestrictResult",
+    ),
+    // ADR 0072 channels: the application's version, then the channel's version.
+    mg(
+        "messaging.channel-verification.decide",
+        "POST /internal/v1/operator/channel-verifications/{application_id}/decide",
+        Some(1),
+        Reason::Required,
+        &[
+            MSG_TENANT,
+            b("decision", "decision", In::Enum(&["APPROVE", "REJECT"]), true),
+        ],
+        &["APPROVED", "REJECTED"],
+        MSG_CHANNEL_DECIDED,
+        "MessagingChannelVerificationDecideRequest",
+        "MessagingChannelVerificationDecideResult",
+    ),
+    mg(
+        "messaging.channel-verification.revoke",
+        "POST /internal/v1/operator/channels/{channel_id}/verification/revoke",
+        Some(1),
+        Reason::Required,
+        &[MSG_TENANT],
+        &["REVOKED"],
+        MSG_CHANNEL_REVOKED,
+        "MessagingChannelVerificationRevokeRequest",
+        "MessagingChannelVerificationRevokeResult",
+    ),
+    mg(
+        "messaging.channel.moderate",
+        "POST /internal/v1/operator/channels/{channel_id}/moderate",
+        Some(1),
+        Reason::Required,
+        &[
+            MSG_TENANT,
+            b(
+                "state",
+                "state",
+                In::Enum(&["ACTIVE", "RESTRICTED", "SUSPENDED", "BANNED"]),
+                true,
+            ),
+        ],
+        &["ACTIVE", "RESTRICTED", "SUSPENDED", "BANNED"],
+        MSG_CHANNEL_MODERATED,
+        "MessagingChannelModerateRequest",
+        "MessagingChannelModerateResult",
+    ),
+    mg(
+        "messaging.channel-post.takedown",
+        "POST /internal/v1/operator/channels/{channel_id}/posts/{post_id}/takedown",
+        Some(1),
+        Reason::Required,
+        &[MSG_TENANT],
+        &["TAKEN_DOWN"],
+        MSG_CHANNEL_TAKEN_DOWN,
+        "MessagingChannelPostTakedownRequest",
+        "MessagingChannelPostTakedownResult",
+    ),
+    mg(
+        "messaging.channel-report.resolve",
+        "POST /internal/v1/operator/channel-reports/{report_id}/resolve",
+        Some(1),
+        Reason::Required,
+        &[
+            MSG_TENANT,
+            b(
+                "resolution",
+                "resolution",
+                In::Enum(&["ACTIONED", "DISMISSED"]),
+                true,
+            ),
+        ],
+        &["ACTIONED", "DISMISSED"],
+        MSG_CHANNEL_REPORT_RESOLVED,
+        "MessagingChannelReportResolveRequest",
+        "MessagingChannelReportResolveResult",
     ),
     mg(
         "messaging.policy.change",

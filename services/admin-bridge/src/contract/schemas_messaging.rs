@@ -178,6 +178,88 @@ pub const EFFECTIVE_POLICY: &[OutField] = &[
     o("abuse", "abuse", Out::Obj(POLICY_ABUSE), true),
     o("backups", "backups", Out::Obj(POLICY_BACKUPS), false),
 ];
+// ---- ADR 0072: channel reads, described as data (translation and schema share them) ---
+
+/// One verification application with the channel's public handle, codes and counts.
+pub const CHANNEL_VERIFICATION: &[OutField] = &[
+    o("application_id", "id", Out::Uuid, false),
+    o("tenant_id", "tenantId", Out::Uuid, false),
+    o("application_scope_id", "applicationId", Out::Uuid, false),
+    o("environment_id", "environmentId", Out::Uuid, false),
+    o("channel_id", "channelId", Out::Uuid, false),
+    o("basis", "basis", Out::Code, false),
+    o("state", "state", Out::Code, false),
+    o("decision_reason", "decisionReason", Out::Code, true),
+    o("decided_at", "decidedAt", Out::Time, true),
+    o("created_at", "createdAt", Out::Time, false),
+    o("version", "version", Out::Int, false),
+    o("channel_exists", "channelExists", Out::Bool, false),
+    o("handle", "handle", Out::Str, true),
+    o("category", "category", Out::Code, true),
+    o("country", "country", Out::Code, true),
+    o("language", "language", Out::Str, true),
+    o("follower_count", "followerCount", Out::Int, false),
+    o("post_count", "postCount", Out::Int, false),
+    o("channel_created_at", "channelCreatedAt", Out::Time, true),
+];
+/// One channel / post report: no reporter, no note.
+pub const CHANNEL_REPORT: &[OutField] = &[
+    o("report_id", "id", Out::Uuid, false),
+    o("tenant_id", "tenantId", Out::Uuid, false),
+    o("application_id", "applicationId", Out::Uuid, false),
+    o("environment_id", "environmentId", Out::Uuid, false),
+    o("channel_id", "channelId", Out::Uuid, false),
+    o("post_id", "postId", Out::Uuid, true),
+    o("category", "category", Out::Code, false),
+    o("status", "status", Out::Code, false),
+    o("resolution", "resolution", Out::Code, true),
+    o("resolved_at", "resolvedAt", Out::Time, true),
+    o("created_at", "createdAt", Out::Time, false),
+    o("version", "version", Out::Int, false),
+];
+/// One channel's handle, codes, states, counts and version.
+pub const CHANNEL: &[OutField] = &[
+    o("channel_id", "channelId", Out::Uuid, false),
+    o("tenant_id", "tenantId", Out::Uuid, false),
+    o("application_id", "applicationId", Out::Uuid, false),
+    o("environment_id", "environmentId", Out::Uuid, false),
+    o("handle", "handle", Out::Str, true),
+    o("category", "category", Out::Code, true),
+    o("country", "country", Out::Code, true),
+    o("language", "language", Out::Str, true),
+    o("visibility", "visibility", Out::Code, false),
+    o("moderation_state", "moderationState", Out::Code, false),
+    o("moderation_reason", "moderationReason", Out::Code, true),
+    o(
+        "moderation_changed_at",
+        "moderationChangedAt",
+        Out::Time,
+        true,
+    ),
+    o("verified", "verified", Out::Bool, false),
+    o("verified_at", "verifiedAt", Out::Time, true),
+    o("follower_count", "followerCount", Out::Int, false),
+    o("post_count", "postCount", Out::Int, false),
+    o("open_reports", "openReports", Out::Int, false),
+    o("created_at", "createdAt", Out::Time, false),
+    o("version", "version", Out::Int, false),
+];
+/// One HQ action on a channel (which staff member acted is HQ's own record).
+pub const CHANNEL_ACTION: &[OutField] = &[
+    o("action_id", "id", Out::Uuid, false),
+    o("tenant_id", "tenantId", Out::Uuid, false),
+    o("application_id", "applicationId", Out::Uuid, false),
+    o("environment_id", "environmentId", Out::Uuid, false),
+    o("channel_id", "channelId", Out::Uuid, false),
+    o("post_id", "postId", Out::Uuid, true),
+    o("report_id", "reportId", Out::Uuid, true),
+    o("verification_id", "verificationId", Out::Uuid, true),
+    o("action", "action", Out::Code, false),
+    o("resulting_state", "resultingState", Out::Code, true),
+    o("reason", "reason", Out::Code, false),
+    o("created_at", "createdAt", Out::Time, false),
+];
+
 /// Context classes (the keys of the owner's `contexts` map).
 pub const CONTEXT_CLASSES: &[&str] = &[
     "DIRECT",
@@ -422,6 +504,34 @@ pub fn insert(m: &mut Map<String, Value>) {
             }),
         ),
     );
+    for (name, item, fields, desc) in [
+        (
+            "MessagingChannelVerification",
+            "MessagingChannelVerificationPage",
+            CHANNEL_VERIFICATION,
+            "ADR 0072: one channel verification application with the channel's public handle, codes and counts (never its name, description or posts). application_scope_id is the CF Meet application (Platform Access) the channel belongs to.",
+        ),
+        (
+            "MessagingChannelReport",
+            "MessagingChannelReportPage",
+            CHANNEL_REPORT,
+            "ADR 0072: one channel or post report: ids, category, states and times; no reporter and no note.",
+        ),
+        (
+            "MessagingChannelAction",
+            "MessagingChannelActionPage",
+            CHANNEL_ACTION,
+            "ADR 0072: one verification or moderation action HQ took on a channel.",
+        ),
+    ] {
+        let mut s = super::schemas_commands::object(fields);
+        s["description"] = json!(desc);
+        m.insert(name.into(), s);
+        m.insert(item.into(), page(name));
+    }
+    let mut channel = super::schemas_commands::object(CHANNEL);
+    channel["description"] = json!("ADR 0072: one channel's handle, codes, states, counts and row version (expected_version of the channel commands).");
+    m.insert("MessagingChannel".into(), channel);
     let mut context = super::schemas_commands::object(POLICY_CONTEXT);
     context["properties"]["context_class"] = json!({"enum": CONTEXT_CLASSES});
     context["required"]

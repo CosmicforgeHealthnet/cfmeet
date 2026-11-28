@@ -137,6 +137,29 @@ impl OwnerPort for FakeMessaging {
                         "requestsRequireAcceptance": true, "comment": "never-relay-this-text"}},
                     "messages": {"replies": true, "threads": true, "reactions": true, "pins": false},
                     "backups": {"enabled": false, "maxBytes": 1048576, "retainCount": 3}}})),
+            "/channel-verifications" => json!({"items": [with_scope(json!({
+                "id": ID, "channelId": ID, "basis": "BRAND", "state": "PENDING", "decisionReason": null,
+                "decidedAt": null, "createdAt": T0, "version": 1, "channelExists": true, "handle": "brand_channel",
+                "category": "NEWS", "country": "NG", "language": "pt-BR", "followerCount": 120, "postCount": 9,
+                "channelCreatedAt": T0, "name": "never-relay-this-text", "description": "never-relay-this-text"
+            }))], "nextCursor": CUR}),
+            "/channel-reports" => json!({"items": [with_scope(json!({
+                "id": ID, "channelId": ID, "postId": ID, "category": "SPAM", "status": "OPEN", "resolution": null,
+                "resolvedAt": null, "createdAt": T0, "version": 1,
+                "reporterPrincipalId": ID, "note": "never-relay-this-text"
+            }))], "nextCursor": null}),
+            "/channel-actions" => json!({"items": [with_scope(json!({
+                "id": ID, "channelId": ID, "postId": null, "reportId": null, "verificationId": ID,
+                "action": "VERIFY", "resultingState": null, "reason": "MEETS_POLICY", "createdAt": T0,
+                "operatorRef": "hq:never-relay-this-text"
+            }))], "nextCursor": null}),
+            x if x == format!("/channels/{ID}") => with_scope(json!({
+                "channelId": ID, "handle": "brand_channel", "category": null, "country": null, "language": "en",
+                "visibility": "PUBLIC", "moderationState": "ACTIVE", "moderationReason": null,
+                "moderationChangedAt": null, "verified": true, "verifiedAt": T0, "followerCount": 120,
+                "postCount": 9, "openReports": 2, "createdAt": T0, "version": 4,
+                "name": "never-relay-this-text"
+            })),
             _ => return Err(OwnerError::NotFound),
         })
     }
@@ -491,4 +514,88 @@ async fn messaging_environment_policy_is_tenant_scoped_and_closed() {
     );
     assert_eq!(code(&send(&h, &c).await.1), "RESOURCE_NOT_FOUND");
     assert_eq!(fake.calls.lock().unwrap().len(), before);
+}
+
+/// ADR 0072: channel verification and moderation reads relay handles, codes, states,
+/// counts and times; never a channel's name or description, a report's note or reporter.
+#[tokio::test]
+async fn messaging_channel_reads_relay_handles_and_counts_only() {
+    let (h, fake) = harness().await;
+    let c = call(
+        "/messaging/channel-verifications",
+        &scoped("verification-review"),
+        "messaging.channel-verifications.read",
+        &["cfmeet.verification.reviewer"],
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(
+        last_call(&fake).1,
+        "/internal/v1/operator/channel-verifications"
+    );
+    let item = &v["result"]["items"][0];
+    assert_eq!(item["application_id"], ID);
+    assert_eq!(item["handle"], "brand_channel");
+    assert_eq!(item["follower_count"], 120);
+    assert_eq!(item["language"], "pt-BR");
+    assert_eq!(v["result"]["next_cursor"], CUR);
+    assert!(!v.to_string().contains("never-relay-this-text"), "{v}");
+
+    let c = call(
+        "/messaging/channel-reports",
+        &scoped("abuse-review"),
+        "messaging.channel-reports.read",
+        ts(),
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    let item = &v["result"]["items"][0];
+    assert_eq!(item["report_id"], ID);
+    assert_eq!(item["category"], "SPAM");
+    assert!(item.get("reporter_principal_id").is_none());
+    assert!(!v.to_string().contains("never-relay-this-text"), "{v}");
+
+    let c = call(
+        &format!("/messaging/channels/{ID}"),
+        &scoped("abuse-review"),
+        "messaging.channels.read",
+        ts(),
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(
+        last_call(&fake).1,
+        format!("/internal/v1/operator/channels/{ID}")
+    );
+    assert_eq!(v["result"]["version"], 4);
+    assert_eq!(v["result"]["verified"], true);
+    assert!(v["result"]["category"].is_null());
+    assert!(!v.to_string().contains("never-relay-this-text"), "{v}");
+    // A verification reviewer cannot read the reports queue.
+    let c = call(
+        "/messaging/channel-reports",
+        &scoped("abuse-review"),
+        "messaging.channel-reports.read",
+        &["cfmeet.verification.reviewer"],
+    );
+    assert_ne!(send(&h, &c).await.0, 200);
+}
+
+#[tokio::test]
+async fn messaging_channel_actions_map_the_window() {
+    let (h, fake) = harness().await;
+    let c = call(
+        "/messaging/channel-actions",
+        &format!("{}{}", scoped("abuse-review"), window(3)),
+        "messaging.channel-actions.read",
+        ts(),
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    let (_, p, query, _) = last_call(&fake);
+    assert_eq!(p, "/internal/v1/operator/channel-actions");
+    let keys: Vec<&str> = query.iter().map(|(k, _)| k.as_str()).collect();
+    assert_eq!(keys, ["since", "until", "limit"]);
+    assert_eq!(v["result"]["items"][0]["action"], "VERIFY");
+    assert!(!v.to_string().contains("never-relay-this-text"), "{v}");
 }
