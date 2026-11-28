@@ -11,7 +11,7 @@
  */
 import { ForwardDialog, GroupAdminTools, ReportDialog } from "./ChatActions";
 import { SAVED_KEY } from "@/components/starred/StarredContent";
-import { callPreview, groupActivityPreview, latestReactionBy, orderByActivity, type CallPreview, type StatusReaction } from "@/lib/messaging/chat-indicators";
+import { callPreview, groupActivityPreview, latestReactionBy, orderByActivity, statusMessage, type CallPreview, type StatusReaction } from "@/lib/messaging/chat-indicators";
 import { ROUTES } from "@/lib/section-menus";
 import ChatInfoExtras from "./ChatInfoExtras";
 import { ArchivedHeader, ArchivedRow, ChatListToggles, ChatListsDialog, ChatsMenu, DisappearingMessages, FilterChips } from "./ChatListControls";
@@ -34,7 +34,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowDown, ArrowLeft, Bell, Check, Clock3, Copy, Star, Forward, Flag, ChevronDown, CornerUpLeft, FileText, History, Info, Lock, LogOut, MessageSquarePlus,
+  ArrowDown, ArrowLeft, Bell, Check, CircleDashed, Clock3, Copy, Star, Forward, Flag, ChevronDown, CornerUpLeft, FileText, History, Info, Lock, LogOut, MessageSquarePlus,
   MoreHorizontal, Pencil, Phone, Pin, PinOff, Search, SendHorizontal, Shield, ShieldCheck, ShieldAlert, SmilePlus, Smartphone,
   Trash2, EyeOff, Video, WifiOff, X,
   UserPlus, Users, Settings2, Link2, Download, MinusCircle, ThumbsDown, Ban,
@@ -703,7 +703,7 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
                 </span>
               </form>
             ) : m.text !== null && !m.file ? (
-              m.rich && m.rich.kind !== "link" ? null : <p className="whitespace-pre-wrap break-words" data-testid="message-text"><LinkifiedText text={m.text} mine={mine} /></p>
+              m.rich && m.rich.kind !== "link" ? null : <StatusAwareText text={m.text} mine={mine} />
             ) : null}
             {m.rich && editing === null ? <RichContentView rich={m.rich} mine={mine} onVote={actions.vote} onClosePoll={actions.closePoll} names={names} /> : null}
             {m.file && loadImage && isPlayableAudio(m.file.mediaType) ? <VoicePlayer load={loadImage} initial={cachedMedia} mine={mine} onDownload={onDownload} /> : m.file && loadImage && isPlayableVideo(m.file.mediaType) ? <ChatVideo load={loadImage} initial={cachedMedia} name={m.file.name} onDownload={onDownload} /> : m.file && loadImage ? <ChatImage load={loadImage} initial={cachedMedia} name={m.file.name} onDownload={onDownload} onOpen={onOpenPhoto} /> : m.file ? (
@@ -780,6 +780,30 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
         ) : null}
       </div>
     </li>
+  );
+}
+
+/**
+ * A message's text; a status reply or share (written by the server, ADR 0069) shows as a
+ * status quote with the reply under it, or a card that opens the status in Updates (where
+ * it opens only for people in its audience). ADR 0073.
+ */
+function StatusAwareText({ text, mine }: { text: string; mine: boolean }) {
+  const status = statusMessage(text);
+  if (!status) return <p className="whitespace-pre-wrap break-words" data-testid="message-text"><LinkifiedText text={text} mine={mine} /></p>;
+  const quote = cn("mb-1 flex items-center gap-2 rounded-lg border-l-4 px-2.5 py-1.5 text-xs", mine ? "border-white/70 bg-white/15" : "border-primary bg-primary/5");
+  if (status.kind === "status-share") {
+    return (
+      <Link href={`/dashboard/updates?status=${status.statusId}`} className={cn(quote, "text-sm font-medium")} data-testid="message-status-share">
+        <CircleDashed className="size-4 shrink-0" aria-hidden /><span className="flex-1">{mine ? "You shared a status" : "Shared a status with you"}</span><span className="text-xs font-semibold underline">View</span>
+      </Link>
+    );
+  }
+  return (
+    <div data-testid="message-status-reply">
+      <p className={quote}><CircleDashed className="size-3.5 shrink-0" aria-hidden /><span className="truncate">{mine ? "Status" : "Your status"} · {status.what}</span></p>
+      <p className="whitespace-pre-wrap break-words" data-testid="message-text"><LinkifiedText text={status.text} mine={mine} /></p>
+    </div>
   );
 }
 
