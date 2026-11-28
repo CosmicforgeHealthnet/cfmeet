@@ -85,7 +85,7 @@ const routes: Route[] = [
   ["GET", cm, page], ["POST", cm, []],
   ["GET", `${cm}/invitations`, []], ["POST", `${cm}/invitations/${id}/accept`, []], ["POST", `${cm}/invitations/${id}/decline`, []],
   ["POST", `${cm}/invite-links/preview`, []], ["POST", `${cm}/invite-links/join`, []],
-  ["GET", `${cm}/join-requests`, []], ["POST", `${cm}/join-requests/${id}/cancel`, []],
+  ["GET", `${cm}/join-requests`, page], ["POST", `${cm}/join-requests/${id}/cancel`, []],
   ["GET", `${cm}/preferences`, []], ["PUT", `${cm}/preferences`, []],
   ["GET", `${cm}/${id}`, []], ["PATCH", `${cm}/${id}`, []], ["DELETE", `${cm}/${id}`, []],
   ["POST", `${cm}/${id}/owner`, []], ["POST", `${cm}/${id}/leave`, []],

@@ -1204,7 +1204,7 @@ pub static ROUTES: &[RelayRoute] = &[
     r(
         Method::GET,
         &[Lit("messaging"), Lit("communities"), Lit("join-requests")],
-        &[],
+        PAGE,
         false,
     ),
     r(
