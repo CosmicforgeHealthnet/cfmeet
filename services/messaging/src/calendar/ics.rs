@@ -72,7 +72,11 @@ fn when(name: &str, t: DateTime<Utc>, e: &IcsEvent) -> String {
     if e.tz == chrono_tz::UTC {
         return format!("{name}:{}", stamp(t));
     }
-    format!("{name};TZID={}:{}", e.tz.name(), local.format("%Y%m%dT%H%M%S"))
+    format!(
+        "{name};TZID={}:{}",
+        e.tz.name(),
+        local.format("%Y%m%dT%H%M%S")
+    )
 }
 
 /// A complete `VCALENDAR` of `events`.

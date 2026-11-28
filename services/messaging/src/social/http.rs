@@ -114,7 +114,7 @@ pub fn routes() -> Router<AppState> {
         )
 }
 
-type Reply = Result<axum::response::Response, ApiError>;
+pub(crate) type Reply = Result<axum::response::Response, ApiError>;
 
 fn ok(v: serde_json::Value) -> Reply {
     Ok(Json(v).into_response())
@@ -439,7 +439,7 @@ async fn unmute(
 
 // ------------------------------------------------------------------------------ media
 
-async fn media_create(
+pub(crate) async fn media_create(
     state: AppState,
     caller: CustomerCaller,
     headers: HeaderMap,
@@ -453,7 +453,7 @@ async fn media_create(
     )
 }
 
-async fn media_get(
+pub(crate) async fn media_get(
     state: AppState,
     caller: CustomerCaller,
     headers: HeaderMap,
@@ -464,7 +464,7 @@ async fn media_get(
     ok(media::get(&state, caller.context(), &acting, purpose, id).await?)
 }
 
-async fn media_cancel(
+pub(crate) async fn media_cancel(
     state: AppState,
     caller: CustomerCaller,
     headers: HeaderMap,
@@ -481,7 +481,7 @@ fn part_number(raw: &str) -> Result<i32, ApiError> {
         .map_err(|_| ApiError::validation("The part number must be a whole number"))
 }
 
-async fn media_part(
+pub(crate) async fn media_part(
     state: AppState,
     caller: CustomerCaller,
     headers: HeaderMap,
@@ -494,7 +494,7 @@ async fn media_part(
     ok(media::part_upload(&state, caller.context(), &acting, purpose, id, part, body).await?)
 }
 
-async fn media_complete(
+pub(crate) async fn media_complete(
     state: AppState,
     caller: CustomerCaller,
     headers: HeaderMap,
@@ -505,7 +505,7 @@ async fn media_complete(
     ok(media::complete(&state, caller.context(), &acting, purpose, id).await?)
 }
 
-async fn media_grants(
+pub(crate) async fn media_grants(
     state: AppState,
     caller: CustomerCaller,
     headers: HeaderMap,

@@ -431,7 +431,10 @@ mod tests {
                 utc("2026-12-28T09:00:00Z"),
             ]
         );
-        assert_eq!(s.rrule().unwrap(), "FREQ=WEEKLY;INTERVAL=2;COUNT=5;BYDAY=MO,WE");
+        assert_eq!(
+            s.rrule().unwrap(),
+            "FREQ=WEEKLY;INTERVAL=2;COUNT=5;BYDAY=MO,WE"
+        );
     }
 
     #[test]
@@ -513,7 +516,10 @@ mod tests {
             Some(rule(Frequency::Weekly, 1, Some(2), &[])),
         );
         let all: Vec<_> = s.occurrences().collect();
-        assert_eq!(all[1], (utc("2026-10-31T00:00:00Z"), utc("2026-11-01T00:00:00Z")));
+        assert_eq!(
+            all[1],
+            (utc("2026-10-31T00:00:00Z"), utc("2026-11-01T00:00:00Z"))
+        );
     }
 
     #[test]
@@ -529,10 +535,7 @@ mod tests {
         let w = s.between(utc("2026-02-01T08:30:00Z"), utc("2026-02-03T00:00:00Z"), 10);
         assert_eq!(
             w.iter().map(|o| o.0).collect::<Vec<_>>(),
-            vec![
-                utc("2026-02-01T08:00:00Z"),
-                utc("2026-02-02T08:00:00Z")
-            ]
+            vec![utc("2026-02-01T08:00:00Z"), utc("2026-02-02T08:00:00Z")]
         );
         assert_eq!(
             s.next_after(utc("2026-02-01T09:00:00Z")).unwrap().0,
@@ -551,10 +554,23 @@ mod tests {
 
     #[test]
     fn rule_bounds() {
-        let base = |r| series("2026-12-01T10:00:00Z", "2026-12-01T11:00:00Z", "UTC", Some(r));
-        assert!(base(rule(Frequency::Daily, 0, None, &[])).validate().is_err());
-        assert!(base(rule(Frequency::Daily, 100, None, &[])).validate().is_err());
-        assert!(base(rule(Frequency::Daily, 1, Some(731), &[])).validate().is_err());
+        let base = |r| {
+            series(
+                "2026-12-01T10:00:00Z",
+                "2026-12-01T11:00:00Z",
+                "UTC",
+                Some(r),
+            )
+        };
+        assert!(base(rule(Frequency::Daily, 0, None, &[]))
+            .validate()
+            .is_err());
+        assert!(base(rule(Frequency::Daily, 100, None, &[]))
+            .validate()
+            .is_err());
+        assert!(base(rule(Frequency::Daily, 1, Some(731), &[]))
+            .validate()
+            .is_err());
         let mut r = rule(Frequency::Daily, 1, Some(3), &[]);
         r.until = Some(NaiveDate::from_ymd_opt(2027, 1, 1).unwrap());
         assert!(base(r).validate().is_err());

@@ -8,7 +8,8 @@
 //!   end, NULL for an open series) bounds every query; `search_vector` serves search.
 //! * `messaging_event_people` — organizer, co-organizers, invitees and conversation members
 //!   who answered, with their RSVP.
-//! * `messaging_event_reminders` — each person's own reminders with the next fire time.
+//! * `messaging_event_reminders` — each person's own reminders with the next fire time and
+//!   the scope of the session that set them (a reminder notice is written without a request).
 //! * `messaging_event_notices` — the Notification Service outbox of invitations,
 //!   cancellations and reminders (written only when enabled).
 //! * The ADR 0069 media store accepts the purpose `EVENT` (cover images). The previous image
@@ -98,6 +99,12 @@ CREATE TABLE messaging_event_reminders (
     principal_id    UUID         NOT NULL,
     minutes_before  INTEGER      NOT NULL,
     next_fire_at    TIMESTAMPTZ,
+    tenant_id           UUID         NOT NULL,
+    application_id      UUID         NOT NULL,
+    environment_id      UUID         NOT NULL,
+    service_account_id  UUID         NOT NULL,
+    environment_kind    VARCHAR(16)  NOT NULL,
+    first_party         BOOLEAN      NOT NULL,
     created_at      TIMESTAMPTZ  NOT NULL,
     CONSTRAINT pk_messaging_event_reminders PRIMARY KEY (event_id, principal_id, minutes_before),
     CONSTRAINT fk_messaging_event_reminders_event FOREIGN KEY (event_id) REFERENCES messaging_events (id) ON DELETE CASCADE,
