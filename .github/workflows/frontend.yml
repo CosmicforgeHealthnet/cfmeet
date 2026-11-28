@@ -67,11 +67,10 @@ jobs:
       - name: Status publishing queue tests
         run: node --experimental-strip-types --test tests/status-publisher.test.mjs
 
-      # TRANSITIONAL (remove after #193 is deployed): Status / Channels fall back to
-      # /api/v2/social/* only on the Meeting relay's 404 ENDPOINT_NOT_FOUND, never on a real
-      # 404 or a 403 privacy denial.
-      - name: Status / Channels backend fallback tests
-        run: node --experimental-strip-types --test tests/social-backend.test.mjs
+      # Status privacy and management rules (ADR 0069): audience labels and choices, @mentions
+      # inside the audience, time left, unique viewers, reactions, segmented rings, contact matching.
+      - name: Status privacy tests
+        run: node --experimental-strip-types --test tests/status-privacy.test.mjs
 
       # Private chats (MLS) like WhatsApp: senders add every registered device, devices keep
       # KeyPackages published, removals never block a chat, unreadable messages show a label.

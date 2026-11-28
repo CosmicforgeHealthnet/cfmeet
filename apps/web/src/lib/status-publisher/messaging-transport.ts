@@ -12,7 +12,6 @@
  * be created from COMPLETE media of the caller, so nothing pending is ever visible to anyone.
  */
 import { socialService, type CreateStatus } from "@/services/v2/social.service";
-import { isRouteNotAllowed } from "@/services/v2/social-backend";
 import { transportError } from "./queue";
 import type { StatusCreateRequest, StatusTransport, TransportError } from "./types";
 
@@ -28,8 +27,6 @@ function messageOf(e: unknown): string | undefined {
 
 /** Service error → the queue's error kinds. `phase` decides what 400/404/409 mean. */
 function mapError(e: unknown, phase: "start" | "part" | "complete" | "create" | "read"): TransportError {
-  // Kept recognisable so the queue's transport can switch backends (TRANSITIONAL, social-backend.ts).
-  if (isRouteNotAllowed(e)) return Object.assign(transportError("rejected", "Not served here", 404), { code: "ENDPOINT_NOT_FOUND" });
   if ((e as { name?: string })?.name === "AbortError" || (e as { name?: string })?.name === "CanceledError") {
     return transportError("aborted", "Cancelled");
   }
