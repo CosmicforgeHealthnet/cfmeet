@@ -49,6 +49,21 @@ export default function MusicPicker({ initial, onDone, onRemove, onClose, maxMs 
   const stopEnvelope = useRef<(() => void) | null>(null);
 
   useEffect(() => { void listTracks().then(setLibrary); }, []);
+  // Escape closes this sheet only (the editor underneath listens on window too).
+  const closeRef = useRef(onClose);
+  useEffect(() => { closeRef.current = onClose; });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      e.preventDefault();
+      stopEnvelope.current?.();
+      audio.current?.pause();
+      closeRef.current();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
 
   const open = async (file: Blob, title: string, known?: number) => {
     setLoading(true);
