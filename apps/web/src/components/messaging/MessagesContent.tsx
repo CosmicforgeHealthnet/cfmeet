@@ -14,6 +14,8 @@ import SavedMessages, { SAVED_KEY } from "./SavedMessages";
 import ChatInfoExtras from "./ChatInfoExtras";
 import { ArchivedHeader, ArchivedRow, ChatListToggles, ChatListsDialog, ChatsMenu, DisappearingMessages, FilterChips } from "./ChatListControls";
 import { Avatar, ChatListRow, Ticks, colorFor, listTime, useGroupPhoto } from "./ChatListRow";
+import { useStatusRings } from "@/hooks/v2/useSocial";
+import { StatusRingFrame, useOpenStatus } from "@/components/updates/StatusRing";
 import { GroupDescription, GroupPhoto } from "./GroupInfo";
 import { AttachMenu, RichContentView } from "./RichMessages";
 import { ChatImage, ChatVideo, LinkifiedText, PhotoViewer } from "./BubbleParts";
@@ -849,6 +851,10 @@ function DetailsPanel({ engine, conversation, title, onClose, shareEnabled, call
   };
   const managed = conversation.securityProfile === "MANAGED";
   const isGroup = conversation.contextClass === "GROUP";
+  // Contact info of a DIRECT chat: their status ring (tap the photo to view their status).
+  const counterpart = conversation.contextClass === "DIRECT" ? conversation.members.find((m) => m !== me) ?? null : null;
+  const counterpartRing = useStatusRings([counterpart]).get(counterpart ?? "") ?? null;
+  const openStatus = useOpenStatus();
   const normalized = normalizeCfMeetId(cfMeetId);
   const field = "h-10 min-w-0 flex-1 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-primary";
   const small = "h-10 shrink-0 rounded-xl px-3.5 text-sm font-semibold text-primary hover:bg-primary/10 disabled:opacity-40";
@@ -915,7 +921,11 @@ function DetailsPanel({ engine, conversation, title, onClose, shareEnabled, call
       <div className="no-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto pb-6">
         {/* Who it is, and quick actions. */}
         <section className="flex flex-col items-center px-4 pb-3 pt-6 text-center">
-          <GroupPhoto engine={engine} conversation={conversation} title={title} canEdit={isGroup && managed && manager} />
+          {counterpartRing && openStatus ? (
+            <button type="button" aria-label={`View ${title}'s status`} data-testid="info-status-ring" onClick={() => openStatus(counterpartRing.principalId, title)} className="rounded-full">
+              <StatusRingFrame ring={counterpartRing}><Avatar name={title} seed={conversation.id} size="size-24" className="text-4xl" /></StatusRingFrame>
+            </button>
+          ) : <GroupPhoto engine={engine} conversation={conversation} title={title} canEdit={isGroup && managed && manager} />}
           {renaming ? (
             <form className="mt-3 flex w-full gap-2" onSubmit={(e) => { e.preventDefault(); run(engine.renameConversation(conversation.id, name).then(() => setRenaming(false))); }}>
               <input autoFocus aria-label="Group name" placeholder="Group name" maxLength={120} value={name} onChange={(e) => setName(e.target.value)} className={field} />
@@ -1869,6 +1879,10 @@ function PersonalMessages() {
   const chips = filterChips({ unread: unreadTotal, hasPrivate, lists: s.chatLists });
   const me = s.identity?.principalId ?? null;
   const shownRows = conversations.slice(0, rowLimit);
+  // Status rings of the people in the shown DIRECT chats (only those whose status we may see).
+  const counterpartOf = (c: (typeof shownRows)[number]) => (c.contextClass === "DIRECT" ? c.members.find((m) => m !== me) ?? null : null);
+  const rings = useStatusRings(shownRows.map(counterpartOf));
+  const openStatus = useOpenStatus();
   const selectChat = useCallback((id: string) => setSelected(id), []);
   // Windowing: the next rows are added when the end of the list comes into view.
   const moreRows = useRef<HTMLLIElement | null>(null);
@@ -1943,7 +1957,8 @@ function PersonalMessages() {
                   senderName={c.contextClass === "GROUP" && senderId ? (s.names[senderId] ?? "").split(" ")[0] || null : null}
                   typingName={typer ? (s.names[typer]?.split(" ")[0] ?? "") : null}
                   active={c.id === selected} muted={muted.has(c.id)} draft={readDraft(me, c.id)}
-                  deviceRegisteredAt={s.deviceRegisteredAt} onSelect={selectChat} />
+                  deviceRegisteredAt={s.deviceRegisteredAt} onSelect={selectChat}
+                  statusRing={rings.get(counterpartOf(c) ?? "") ?? null} onOpenStatus={openStatus ?? undefined} />
               );
             })}
             {hasMoreRows ? <li ref={moreRows} aria-hidden className="h-8" data-testid="more-chats" /> : null}

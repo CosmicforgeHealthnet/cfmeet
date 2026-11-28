@@ -58,7 +58,7 @@ export function useStatusAudience() {
 export type StatusAudienceHandle = ReturnType<typeof useStatusAudience>;
 
 /** The pill beside Publish; opens the picker over the editor. */
-export function AudienceButton({ audience, className, tone = "dark" }: { audience: StatusAudienceHandle; className?: string; tone?: "dark" | "light" }) {
+export function AudienceButton({ audience, className, tone = "dark", showSharing = true }: { audience: StatusAudienceHandle; className?: string; tone?: "dark" | "light"; showSharing?: boolean }) {
   const [open, setOpen] = useState(false);
   const Icon = audience.effective?.mode === "CLOSE_FRIENDS" ? Star : audience.effective?.mode === "CONTACTS" || !audience.effective ? Users : Lock;
   return (
@@ -71,7 +71,7 @@ export function AudienceButton({ audience, className, tone = "dark" }: { audienc
         <ChevronDown className="size-4 shrink-0 opacity-70" />
       </button>
       {open ? (
-        <AudiencePicker initial={audience.effective} allowSharing={audience.allowSharing}
+        <AudiencePicker initial={audience.effective} allowSharing={audience.allowSharing} showSharing={showSharing}
           onClose={() => setOpen(false)}
           onDone={(selection, allowSharing) => { audience.setState({ selection, allowSharing }); setOpen(false); }} />
       ) : null}

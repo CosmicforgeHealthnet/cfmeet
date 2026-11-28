@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { mediaUrl, socialService, type ChannelPost, type MediaView, type StatusRing } from "@/services/v2/social.service";
-import { ringBatches } from "@/lib/status-privacy";
+import { matchContacts, ringBatches } from "@/lib/status-privacy";
+import { messagingService } from "@/services/v2/messaging.service";
 
 export const socialKeys = {
   all: ["v2", "social"] as const,
@@ -36,8 +37,13 @@ export function useCloseFriends(enabled = true) {
   return useQuery({ queryKey: socialKeys.closeFriends, queryFn: socialService.closeFriends, enabled, staleTime: 60_000, retry: 1 });
 }
 
+/** The caller's named (CUSTOM) lists; Close Friends has its own hook. */
 export function useAudienceLists(enabled = true) {
-  return useQuery({ queryKey: socialKeys.lists, queryFn: socialService.audienceLists, enabled, staleTime: 60_000, retry: 1 });
+  return useQuery({
+    queryKey: socialKeys.lists,
+    queryFn: async () => (await socialService.audienceLists()).filter((l) => l.kind === "CUSTOM"),
+    enabled, staleTime: 60_000, retry: 1,
+  });
 }
 
 export function useStatusMutes() {
@@ -127,4 +133,33 @@ export function useMediaUrl(media: MediaView | null | undefined) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaId]);
   return { url: media ? url : null, failed };
+}
+
+/**
+ * Status rings for Communications Hub contacts (known by CF Meet ID, not by principal):
+ * mutual contacts' principals are named through the names API and matched to contacts by
+ * name and nickname only when the match is unique (display-only; ambiguity shows no ring).
+ * Returns cfMeetId → ring.
+ */
+export function useContactStatusRings(contacts: { cfMeetId: string; displayName: string; alias: string | null }[], enabled = true) {
+  const eligible = useQuery({
+    queryKey: [...socialKeys.eligible, "named"] as const,
+    queryFn: async () => {
+      const ids = (await socialService.eligibleContacts()).map((p) => p.principalId ?? p.userId);
+      const out: { principalId: string; displayName: string; alias?: string | null }[] = [];
+      for (let i = 0; i < ids.length; i += 256) out.push(...(await messagingService.names(ids.slice(i, i + 256))).principals);
+      return out;
+    },
+    enabled: enabled && contacts.length > 0,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const byContact = matchContacts(contacts, eligible.data ?? []);
+  const rings = useStatusRings([...byContact.values()]);
+  const out = new Map<string, StatusRing>();
+  for (const [cfMeetId, principal] of byContact) {
+    const r = rings.get(principal);
+    if (r) out.set(cfMeetId, r);
+  }
+  return out;
 }

@@ -95,7 +95,7 @@ function ProgressRing({ progress, children }: { progress: number; children: Reac
 }
 
 /** A pending status's preview: the photo, the video's thumbnail / first frame, or the text on its colour. */
-function PendingThumb({ preview, small }: { preview: JobPreview; small?: boolean }) {
+export function PendingThumb({ preview, small }: { preview: JobPreview; small?: boolean }) {
   return (
     <span aria-hidden className={cn(small ? "relative block size-12 shrink-0 overflow-hidden rounded-xl" : "absolute inset-0")}>
       {preview.kind === "TEXT" ? (
@@ -130,7 +130,7 @@ function BlobMedia({ blob, kind }: { blob: Blob; kind: "image" | "video" }) {
   return <video ref={video} muted playsInline preload="metadata" className="size-full object-cover" />;
 }
 
-function stateText(job: JobView, online: boolean): string {
+export function stateText(job: JobView, online: boolean): string {
   switch (job.state) {
     case "failed": return job.error && job.error !== "Failed to upload" ? `Failed to upload · ${job.error}` : "Failed to upload";
     case "processing": return `Preparing… ${Math.round(job.progress * 100)}%`;
