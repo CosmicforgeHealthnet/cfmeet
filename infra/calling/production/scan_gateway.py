@@ -41,7 +41,10 @@ VERDICT_KID = 'scan-verdict-20261105'
 # enforces the same 25m so an oversized body is refused before it is proxied.
 STREAM_MAX_BYTES = 25 * 1024 * 1024
 BACKEND_CONCURRENCY = 2              # of the engine's MaxThreads 8
-MAX_SIGNATURE_AGE_HOURS = 72
+# Owner decision 2026-11-28: 7 days, not 72 h. Upstream ClamAV published no daily database
+# after 25 Nov 2026 06:27 UTC, and at 72 h the gateway refused every MANAGED attachment.
+# Return to 72 once upstream publishes on its normal daily cadence again.
+MAX_SIGNATURE_AGE_HOURS = 168
 GATEWAY_MEMORY_MIB = 64
 ENGINE_HEADROOM_MIB = 512            # spare inside the engine's own cgroup limit
 CLIENTS = [{'issuer': 'cfmeet.messaging', 'product': 'cfmeet', 'maxBytes': STREAM_MAX_BYTES,

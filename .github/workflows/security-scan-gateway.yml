@@ -61,6 +61,10 @@ jobs:
         working-directory: services/security-scan-gateway
     env:
       SCAN_GATEWAY_TEST_CLAMD_ADDRESS: 127.0.0.1:3310
+      # CI only: upstream ClamAV can go longer than 72 h without publishing a daily database
+      # (nothing after 25 Nov 2026 06:27 UTC as of 28 Nov). CI tests the gateway, not the
+      # upstream cadence, so it allows 7 days; production keeps its 72 h limit.
+      CI_MAX_SIGNATURE_AGE_HOURS: "168"
     steps:
       - uses: actions/checkout@v4
       - name: Start the official ClamAV engine (downloads current signatures)

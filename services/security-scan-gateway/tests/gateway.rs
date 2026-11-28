@@ -243,7 +243,7 @@ async fn gateway_with(
         backend_slots: Arc::new(Semaphore::new(o.backend_concurrency)),
         engine: RwLock::new(EngineStatus::default()),
         engine_name: "clamav",
-        max_signature_age: Duration::from_secs(72 * 3600),
+        max_signature_age: Duration::from_secs(max_signature_age_hours() * 3600),
         verdict_key,
         verdict_key_id: "scan-verdict-1".into(),
         scan_timeout: o.scan_timeout,
@@ -427,10 +427,20 @@ async fn an_unreachable_engine_is_unavailable_and_not_ready() {
     );
 }
 
+/// The signature-age limit under test: 72 h, unless CI widens it with
+/// CI_MAX_SIGNATURE_AGE_HOURS because upstream ClamAV has not published for over 72 h
+/// (the real-engine tests then still run). Production keeps its own 72 h default.
+fn max_signature_age_hours() -> u64 {
+    std::env::var("CI_MAX_SIGNATURE_AGE_HOURS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(72)
+}
+
 #[tokio::test]
 async fn stale_signatures_refuse_to_scan() {
     let f = gateway(Options {
-        clock_offset: 73 * 3600,
+        clock_offset: (max_signature_age_hours() as i64 + 1) * 3600,
         ..Default::default()
     })
     .await;
