@@ -33,7 +33,7 @@ import {
   ArrowDown, ArrowLeft, Bell, Check, Clock3, Copy, Star, Forward, Flag, ChevronDown, CornerUpLeft, FileText, History, Info, Lock, LogOut, MessageSquarePlus,
   MoreHorizontal, Pencil, Phone, Pin, PinOff, Search, SendHorizontal, Shield, ShieldCheck, ShieldAlert, SmilePlus, Smartphone,
   Trash2, EyeOff, Video, WifiOff, X,
-  UserPlus, Users, Settings2, Link2, Download, MinusCircle, ThumbsDown, Ban,
+  UserPlus, Users, Settings2, Link2, Download, MinusCircle, ThumbsDown, Ban, CalendarDays, CalendarPlus,
 } from "lucide-react";
 import { Popover } from "radix-ui";
 
@@ -67,6 +67,8 @@ import { useSharedMessagingEngine } from "./MessagingEngineProvider";
 import { EmojiPicker } from "./EmojiPicker";
 import { usePeoplePicker } from "./people-picker";
 import { authService } from "@/services/auth.service";
+import EventForm from "@/components/events/EventForm";
+import { EventLinkCards } from "@/components/events/EventLinkCard";
 
 function useEngine(): MessagingEngine {
   // The app-wide engine (live on every page of the signed-in app); a page-local one only
@@ -699,7 +701,7 @@ function MessageBubble({ m, name, names, onDownload, loadImage, cachedMedia, onJ
                 </span>
               </form>
             ) : m.text !== null && !m.file ? (
-              m.rich && m.rich.kind !== "link" ? null : <p className="whitespace-pre-wrap break-words" data-testid="message-text"><LinkifiedText text={m.text} mine={mine} /></p>
+              m.rich && m.rich.kind !== "link" ? null : <><p className="whitespace-pre-wrap break-words" data-testid="message-text"><LinkifiedText text={m.text} mine={mine} /></p><EventLinkCards text={m.text} mine={mine} /></>
             ) : null}
             {m.rich && editing === null ? <RichContentView rich={m.rich} mine={mine} onVote={actions.vote} onClosePoll={actions.closePoll} names={names} /> : null}
             {m.file && loadImage && isPlayableAudio(m.file.mediaType) ? <VoicePlayer load={loadImage} initial={cachedMedia} mine={mine} onDownload={onDownload} /> : m.file && loadImage && isPlayableVideo(m.file.mediaType) ? <ChatVideo load={loadImage} initial={cachedMedia} name={m.file.name} onDownload={onDownload} /> : m.file && loadImage ? <ChatImage load={loadImage} initial={cachedMedia} name={m.file.name} onDownload={onDownload} onOpen={onOpenPhoto} /> : m.file ? (
@@ -818,11 +820,13 @@ function TimelineCardView({ card }: { card: TimelineCard }) {
  * starred messages, settings, the members (searchable, admins marked), and the chat's
  * actions (export, clear, exit, report) at the bottom.
  */
-function DetailsPanel({ engine, conversation, title, onClose, shareEnabled, callLinks, onSearch, onOpenStarred, onOpenChat }: {
+function DetailsPanel({ engine, conversation, title, onClose, shareEnabled, callLinks, onSearch, onOpenStarred, onOpenChat, onCreateEvent }: {
   engine: MessagingEngine; conversation: ConversationView; title: string; onClose: () => void; shareEnabled: boolean;
   callLinks: { voice: string | null; video: string | null };
   onSearch: () => void;
   onOpenStarred?: () => void;
+  /** Opens the event form for this chat (Events, ADR 0071). */
+  onCreateEvent?: () => void;
   onOpenChat?: (id: string) => void;
 }) {
   const s = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
@@ -948,6 +952,11 @@ function DetailsPanel({ engine, conversation, title, onClose, shareEnabled, call
             <button type="button" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium hover:bg-muted" onClick={onOpenStarred} data-testid="info-starred"><Star className="size-4 text-muted-foreground" />Starred messages</button>
           </div>
         ) : null}
+        {/* Events of this chat (Messaging, ADR 0071). */}
+        <div className="px-4">
+          <Link href={`/dashboard/events?conversation=${encodeURIComponent(conversation.id)}`} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium hover:bg-muted" data-testid="info-events"><CalendarDays className="size-4 text-muted-foreground" />Events</Link>
+          {onCreateEvent ? <button type="button" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium hover:bg-muted" onClick={onCreateEvent} data-testid="info-create-event"><CalendarPlus className="size-4 text-muted-foreground" />Create event</button> : null}
+        </div>
         <div className="space-y-3 px-4"><ChatListToggles engine={engine} conversation={conversation} pinnedTotal={pinnedCount(s.conversations)} lists={s.chatLists} /><DisappearingMessages engine={engine} conversation={conversation} canChange={!isGroup || manager} /></div>
 
         {isGroup && manager ? (
@@ -1260,6 +1269,7 @@ function ConversationPane({ engine, conversation, focusMessageId, onFocused, onB
   const [staged, setStaged] = useState<File | null>(null);
   const canRecord = useSyncExternalStore(noSubscribe, voiceRecordingSupported, () => false);
   const [details, setDetails] = useState(false);
+  const [creatingEvent, setCreatingEvent] = useState(false);
   const [searching, setSearching] = useState(false);
   const [replyTo, setReplyTo] = useState<MessageView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1739,7 +1749,7 @@ function ConversationPane({ engine, conversation, focusMessageId, onFocused, onB
                 setText(next);
                 requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(at + emoji.length, at + emoji.length); });
               }} />
-              <AttachMenu canAttach={canAttach} canShare={e2ee} canPoll={managed} disabled={!canSend} onFile={() => file.current?.click()} onMedia={() => mediaInput.current?.click()} onSend={(payload) => payload.t === "poll" ? engine.sendPoll(conversation.id, { question: payload.question, options: payload.options, multiple: payload.multiple }) : engine.sendRich(conversation.id, payload)}
+              <AttachMenu canAttach={canAttach} canShare={e2ee} canPoll={managed} disabled={!canSend} onEvent={() => setCreatingEvent(true)} onFile={() => file.current?.click()} onMedia={() => mediaInput.current?.click()} onSend={(payload) => payload.t === "poll" ? engine.sendPoll(conversation.id, { question: payload.question, options: payload.options, multiple: payload.multiple }) : engine.sendRich(conversation.id, payload)}
                 fileTitle={attachments.enabled ? "Attach a file" : "Sending files isn't available in this chat"} />
               <textarea
                 ref={composer}
@@ -1784,7 +1794,9 @@ function ConversationPane({ engine, conversation, focusMessageId, onFocused, onB
       </section>
       {details ? <DetailsPanel engine={engine} conversation={conversation} title={title} onClose={() => setDetails(false)} shareEnabled={!!actions.shareMeeting}
         callLinks={{ voice: actions.voiceCall ? callHref({ conversationId: conversation.id }, "VOICE", title) : null, video: actions.videoCall ? callHref({ conversationId: conversation.id }, "VIDEO", title) : null }}
-        onSearch={() => setSearching(true)} onOpenStarred={onOpenStarred} onOpenChat={onOpenChat} /> : null}
+        onSearch={() => setSearching(true)} onOpenStarred={onOpenStarred} onOpenChat={onOpenChat} onCreateEvent={canSend ? () => setCreatingEvent(true) : undefined} /> : null}
+      {/* After creation the form posts the event link here; the chat shows it as an event card. */}
+      <EventForm open={creatingEvent} conversationId={conversation.id} onClose={() => setCreatingEvent(false)} onSaved={() => setCreatingEvent(false)} />
     </div>
   );
 }
