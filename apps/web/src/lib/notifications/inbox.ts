@@ -35,6 +35,8 @@ export function inboxHref(item: InboxItem): string | null {
     case "OPEN_CONTACT": return "/dashboard/contacts";
     case "OPEN_SECURITY_SETTINGS": return "/dashboard/settings?tab=security";
     case "OPEN_DEVELOPER_APPLICATION": return "/developers";
+    // An event invitation, cancellation or reminder (Messaging, ADR 0071): the event page.
+    case "OPEN_EVENT": return ref ? `/dashboard/events/${ref}` : "/dashboard/events";
     default: return null;
   }
 }

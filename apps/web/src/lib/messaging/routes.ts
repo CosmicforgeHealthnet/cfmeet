@@ -8,6 +8,7 @@ const messages = ["afterSequence", "beforeSequence", "limit", "threadRootId"];
 const c = `conversations/${id}`;
 const st = "messaging/status";
 const ch = "messaging/channels";
+const ev = "messaging/events";
 /** A media part number (0-63, canonical decimal). */
 const part = "(?:[0-9]|[1-5][0-9]|6[0-3])";
 type Route = [MessagingMethod, string, readonly string[]];
@@ -70,7 +71,14 @@ const routes: Route[] = [
   ["GET", `${st}/${id}`, []], ["DELETE", `${st}/${id}`, []], ["POST", `${st}/${id}/view`, []],
   ["PUT", `${st}/${id}/reaction`, []], ["DELETE", `${st}/${id}/reaction`, []], ["GET", `${st}/${id}/viewers`, []],
   ["POST", `${st}/${id}/replies`, []], ["POST", `${st}/${id}/forwards`, []], ["POST", `${st}/${id}/reshares`, []],
-  ...[st, ch].flatMap((base) => [
+  // ADR 0071: Events (owned by Messaging; Meeting only relays them).
+  ["GET", ev, ["view", "from", "to", "tz", "conversationId", "q", "type", "limit", "cursor"]], ["POST", ev, []],
+  ["GET", `${ev}/calendar`, []],
+  ["GET", `${ev}/${id}`, []], ["PATCH", `${ev}/${id}`, []], ["DELETE", `${ev}/${id}`, []],
+  ["POST", `${ev}/${id}/cancel`, []], ["PUT", `${ev}/${id}/rsvp`, []], ["GET", `${ev}/${id}/attendees`, []],
+  ["POST", `${ev}/${id}/invitations`, []], ["DELETE", `${ev}/${id}/invitations/${id}`, []],
+  ["PUT", `${ev}/${id}/reminders`, []], ["GET", `${ev}/${id}/ics`, []],
+  ...[st, ch, ev].flatMap((base) => [
     ["POST", `${base}/media`, []], ["GET", `${base}/media/${id}`, []], ["DELETE", `${base}/media/${id}`, []],
     ["POST", `${base}/media/${id}/parts/${part}`, []], ["POST", `${base}/media/${id}/complete`, []],
     ["POST", `${base}/media/${id}/download-grants`, []],
