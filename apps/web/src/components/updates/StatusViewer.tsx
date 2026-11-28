@@ -5,7 +5,7 @@ import { ArrowLeft, BellOff, Bell, Eye, Forward, MoreVertical, Mic, Music2, Repe
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/toast";
 import { useEligibleContacts, useMediaUrl, useStatusViewers } from "@/hooks/v2/useSocial";
-import { socialService, type PersonView, type StatusPost } from "@/services/v2/social.service";
+import { mediaBlob, socialService, type MediaView, type PersonView, type StatusPost } from "@/services/v2/social.service";
 import { canShare, reactionSummary, uniqueViewers } from "@/lib/status-privacy";
 import TextStatusView from "@/components/media-editor/TextStatusView";
 import Waveform from "@/components/media-editor/Waveform";
@@ -211,7 +211,7 @@ export default function StatusViewer({ person, posts, mine, startAt = 0, muted, 
         ) : (
           <div className="flex size-full flex-col items-center justify-center gap-6 px-8" style={{ background: post.backgroundGradient ? gradientCss(post.backgroundGradient) : post.background ?? "#128C7E" }} data-testid={post.musicTitle ? "status-music" : "status-voice"}>
             <span className="flex size-24 items-center justify-center rounded-full bg-black/30">{post.musicTitle ? <Music2 className={cn("size-10", !hold && "animate-pulse")} /> : <Mic className="size-10" />}</span>
-            {post.musicTitle ? <p className="max-w-xs truncate text-center text-lg font-semibold drop-shadow">{post.musicTitle}</p> : <VoiceWave url={url} progress={progress} />}
+            {post.musicTitle ? <p className="max-w-xs truncate text-center text-lg font-semibold drop-shadow">{post.musicTitle}</p> : <VoiceWave media={post.media} progress={progress} />}
             <audio key={post.postId} ref={(el) => { media.current = el; }} src={url} autoPlay onTimeUpdate={onTime} onEnded={next} />
           </div>
         )}
@@ -269,13 +269,14 @@ export default function StatusViewer({ person, posts, mine, startAt = 0, muted, 
 }
 
 /** A voice status's waveform, filling as it plays. */
-function VoiceWave({ url, progress }: { url: string; progress: number }) {
+function VoiceWave({ media, progress }: { media: MediaView | null; progress: number }) {
   const [peaks, setPeaks] = useState<number[] | null>(null);
   useEffect(() => {
+    if (!media) return;
     let live = true;
-    fetch(url).then((r) => r.blob()).then((b) => audioPeaks(b, 48)).then((p) => { if (live) setPeaks(p); }, () => { if (live) setPeaks([]); });
+    mediaBlob(media).then((b) => audioPeaks(b, 48)).then((p) => { if (live) setPeaks(p); }, () => { if (live) setPeaks([]); });
     return () => { live = false; };
-  }, [url]);
+  }, [media]);
   if (!peaks?.length) return <span className="h-14 w-full max-w-sm" aria-hidden />;
   return <Waveform peaks={peaks} progress={progress} label="Voice note" className="pointer-events-none w-full max-w-sm" />;
 }
