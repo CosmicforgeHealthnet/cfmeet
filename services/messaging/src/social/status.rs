@@ -350,7 +350,7 @@ async fn render(state: &AppState, viewer: Uuid, rows: &[StatusRow]) -> Result<Ve
         db::all::<MediaRow, _>(
             &state.db,
             "SELECT id, tenant_id, application_id, environment_id, owner_principal_id, purpose, kind, media_type, \
-               size_bytes, part_bytes, part_count, duration_ms, state, created_at, completed_at \
+               size_bytes, part_bytes, part_count, duration_ms, state, created_at, completed_at, file_name \
                FROM messaging_social_media WHERE id = ANY($1)",
             vec![media_ids.into()],
         )
@@ -721,6 +721,9 @@ async fn content(
                         return Err(Error::validation("A photo status takes no segment"));
                     }
                     (None, None)
+                }
+                MediaKind::Document => {
+                    return Err(Error::validation("A status can't be a document"))
                 }
             };
             (None, Some(m), start, end)
@@ -1525,7 +1528,7 @@ fn what(row: &StatusRow) -> String {
 
 /// The caller's DIRECT MANAGED conversation with `other` (created when missing, under
 /// every DIRECT rule: Communications policy, blocks, the messaging policy).
-async fn direct_with(
+pub(crate) async fn direct_with(
     state: &AppState,
     ctx: &TrustedContext,
     acting: &Acting,
@@ -1545,7 +1548,7 @@ async fn direct_with(
         .ok_or(Error::code(ErrorCode::InternalError))
 }
 
-async fn send_text(
+pub(crate) async fn send_text(
     state: &AppState,
     ctx: &TrustedContext,
     acting: &Acting,

@@ -55,6 +55,7 @@ mod m20261214_000042_owner_delivered_exports;
 mod m20261215_000043_admin_bridge_events;
 mod m20261216_000044_chat_organization_polls;
 mod m20261217_000045_status_channels;
+mod m20261219_000047_channels_complete;
 
 /// Name of the table recording which Messaging migrations have been applied.
 pub const MIGRATION_TABLE: &str = "messaging_seaql_migrations";
@@ -502,7 +503,10 @@ pub struct SocialMigrator;
 #[async_trait::async_trait]
 impl MigratorTrait for SocialMigrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(self::m20261217_000045_status_channels::Migration)]
+        vec![
+            Box::new(self::m20261217_000045_status_channels::Migration),
+            Box::new(self::m20261219_000047_channels_complete::Migration),
+        ]
     }
     fn migration_table_name() -> DynIden {
         Alias::new(SOCIAL_MIGRATION_TABLE).into_iden()

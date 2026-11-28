@@ -1,0 +1,41 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "resource"
+  ],
+  "properties": {
+    "operation": {
+      "$ref": "#/components/schemas/OperationReadback"
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "channel_id",
+        "verification_state",
+        "verified",
+        "changed_at"
+      ],
+      "properties": {
+        "channel_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "verification_state": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "changed_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "The resource after messaging.channel-verification.revoke; status: REVOKED."
+    }
+  }
+}

@@ -17,9 +17,9 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 | Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.11.0 | 322 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.10.0 | 77 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.35.0 | 146 |
-| Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.25.0 | 168 |
+| Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.26.0 | 199 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.10.0 | 104 |
-| **Total** | | | **817** |
+| **Total** | | | **848** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -1000,7 +1000,7 @@ Contract `packages/contracts/calling/http/v1.openapi.json` version **1.35.0**; b
 
 ## Messaging (MANAGED and PRIVATE_E2EE)
 
-Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.25.0**; base URL env `NEXT_PUBLIC_MESSAGING_URL`. First-party clients go through the Meeting Service relay `/api/v2/messaging/relay/{path}` (personal) or `/api/v2/organizations/{id}/messaging/relay/{path}` (organization), then realtime with a session token -> ticket -> WebSocket.
+Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.26.0**; base URL env `NEXT_PUBLIC_MESSAGING_URL`. First-party clients go through the Meeting Service relay `/api/v2/messaging/relay/{path}` (personal) or `/api/v2/organizations/{id}/messaging/relay/{path}` (organization), then realtime with a session token -> ticket -> WebSocket.
 
 ### Blocked Users
 
@@ -1017,22 +1017,53 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.25.0**;
 | GET | `/v1/messaging/channels` | customer credential (server-side only) | Find channels | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listChannels` |
 | POST | `/v1/messaging/channels` | customer credential (server-side only) | Create a channel | 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#createChannel` |
 | GET | `/v1/messaging/channels/following` | customer credential (server-side only) | Channels I follow | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listFollowedChannels` |
+| POST | `/v1/messaging/channels/invites/join` | customer credential (server-side only) | Join with an invite link | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#joinChannelInvite` |
+| POST | `/v1/messaging/channels/invites/preview` | customer credential (server-side only) | Preview an invite link | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#previewChannelInvite` |
+| GET | `/v1/messaging/channels/lookup` | customer credential (server-side only) | Look up a username | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#lookupChannelHandle` |
 | POST | `/v1/messaging/channels/media` | customer credential (server-side only) | Start a channel media upload | 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#createChannelMedia` |
 | DELETE | `/v1/messaging/channels/media/{mediaId}` | customer credential (server-side only) | Cancel a channel media upload | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#cancelChannelMedia` |
 | GET | `/v1/messaging/channels/media/{mediaId}` | customer credential (server-side only) | Get channel media | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#getChannelMedia` |
 | POST | `/v1/messaging/channels/media/{mediaId}/complete` | customer credential (server-side only) | Complete a channel media upload | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#completeChannelMedia` |
 | POST | `/v1/messaging/channels/media/{mediaId}/download-grants` | customer credential (server-side only) | Read channel media | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#grantChannelMediaDownload` |
 | POST | `/v1/messaging/channels/media/{mediaId}/parts/{part}` | customer credential (server-side only) | Upload a channel media part | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#uploadChannelMediaPart` |
+| GET | `/v1/messaging/channels/starred` | customer credential (server-side only) | My starred channel posts | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listStarredChannelPosts` |
+| GET | `/v1/messaging/channels/suggestions` | customer credential (server-side only) | Channel suggestions | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#suggestChannels` |
 | DELETE | `/v1/messaging/channels/{channelId}` | customer credential (server-side only) | Delete my channel | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#deleteChannel` |
 | GET | `/v1/messaging/channels/{channelId}` | customer credential (server-side only) | Get a channel | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#getChannel` |
 | PATCH | `/v1/messaging/channels/{channelId}` | customer credential (server-side only) | Update my channel | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#updateChannel` |
+| GET | `/v1/messaging/channels/{channelId}/admins` | customer credential (server-side only) | Channel admins | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listChannelAdmins` |
+| DELETE | `/v1/messaging/channels/{channelId}/admins/{principalId}` | customer credential (server-side only) | Remove an admin | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#removeChannelAdmin` |
+| PUT | `/v1/messaging/channels/{channelId}/admins/{principalId}` | customer credential (server-side only) | Add or change an admin | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#putChannelAdmin` |
+| GET | `/v1/messaging/channels/{channelId}/analytics` | customer credential (server-side only) | Channel analytics | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#getChannelAnalytics` |
+| GET | `/v1/messaging/channels/{channelId}/audit` | customer credential (server-side only) | Channel audit log | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listChannelAudit` |
 | DELETE | `/v1/messaging/channels/{channelId}/follow` | customer credential (server-side only) | Unfollow a channel | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#unfollowChannel` |
 | PUT | `/v1/messaging/channels/{channelId}/follow` | customer credential (server-side only) | Follow a channel | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#followChannel` |
+| GET | `/v1/messaging/channels/{channelId}/invites` | customer credential (server-side only) | Invite links | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listChannelInvites` |
+| POST | `/v1/messaging/channels/{channelId}/invites` | customer credential (server-side only) | Create an invite link | 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#createChannelInvite` |
+| DELETE | `/v1/messaging/channels/{channelId}/invites/{inviteId}` | customer credential (server-side only) | Revoke an invite link | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#revokeChannelInvite` |
+| GET | `/v1/messaging/channels/{channelId}/moderation` | customer credential (server-side only) | Moderation history | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#getChannelModeration` |
+| DELETE | `/v1/messaging/channels/{channelId}/mute` | customer credential (server-side only) | Unmute a channel | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#unmuteChannel` |
+| PUT | `/v1/messaging/channels/{channelId}/mute` | customer credential (server-side only) | Mute a channel | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#muteChannel` |
+| POST | `/v1/messaging/channels/{channelId}/owner` | customer credential (server-side only) | Transfer ownership | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#transferChannelOwnership` |
 | GET | `/v1/messaging/channels/{channelId}/posts` | customer credential (server-side only) | Channel posts | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listChannelPosts` |
 | POST | `/v1/messaging/channels/{channelId}/posts` | customer credential (server-side only) | Post in my channel | 200, 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#createChannelPost` |
+| POST | `/v1/messaging/channels/{channelId}/posts/views` | customer credential (server-side only) | Record post views | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#recordChannelPostViews` |
 | DELETE | `/v1/messaging/channels/{channelId}/posts/{postId}` | customer credential (server-side only) | Delete a post in my channel | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#deleteChannelPost` |
+| PATCH | `/v1/messaging/channels/{channelId}/posts/{postId}` | customer credential (server-side only) | Edit a post | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#editChannelPost` |
+| POST | `/v1/messaging/channels/{channelId}/posts/{postId}/forwards` | customer credential (server-side only) | Share a post into chats | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#forwardChannelPost` |
+| DELETE | `/v1/messaging/channels/{channelId}/posts/{postId}/pin` | customer credential (server-side only) | Unpin a post | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#unpinChannelPost` |
+| PUT | `/v1/messaging/channels/{channelId}/posts/{postId}/pin` | customer credential (server-side only) | Pin a post | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#pinChannelPost` |
 | DELETE | `/v1/messaging/channels/{channelId}/posts/{postId}/reaction` | customer credential (server-side only) | Remove my channel post reaction | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#unreactToChannelPost` |
 | PUT | `/v1/messaging/channels/{channelId}/posts/{postId}/reaction` | customer credential (server-side only) | React to a channel post | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#reactToChannelPost` |
+| DELETE | `/v1/messaging/channels/{channelId}/posts/{postId}/star` | customer credential (server-side only) | Unstar a post | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#unstarChannelPost` |
+| PUT | `/v1/messaging/channels/{channelId}/posts/{postId}/star` | customer credential (server-side only) | Star a post | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#starChannelPost` |
+| DELETE | `/v1/messaging/channels/{channelId}/posts/{postId}/vote` | customer credential (server-side only) | Retract a vote | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#retractChannelPollVote` |
+| PUT | `/v1/messaging/channels/{channelId}/posts/{postId}/vote` | customer credential (server-side only) | Vote in a poll | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#voteChannelPoll` |
+| POST | `/v1/messaging/channels/{channelId}/reports` | customer credential (server-side only) | Report a channel or post | 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#reportChannel` |
+| GET | `/v1/messaging/channels/{channelId}/scheduled` | customer credential (server-side only) | Scheduled posts | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listScheduledChannelPosts` |
+| DELETE | `/v1/messaging/channels/{channelId}/scheduled/{postId}` | customer credential (server-side only) | Cancel a scheduled post | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#cancelScheduledChannelPost` |
+| GET | `/v1/messaging/channels/{channelId}/verification` | customer credential (server-side only) | Verification | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#getChannelVerification` |
+| POST | `/v1/messaging/channels/{channelId}/verification` | customer credential (server-side only) | Apply for verification | 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#applyChannelVerification` |
 
 ### Client Sessions
 

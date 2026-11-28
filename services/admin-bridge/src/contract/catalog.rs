@@ -1206,6 +1206,133 @@ pub fn catalog() -> Vec<Capability> {
         .roles(&[L::PlatformOps])
         .purposes(&[U::OpsIncident]),
     );
+    // ADR 0072: channel verification and moderation (owners apply and report; only HQ
+    // decides). Reads carry handles, codes, states, counts and times: never a channel's
+    // name, description or posts, a report's note, a reporter or a follower.
+    c.push(
+        mg(
+            get(
+                "messaging.channel-verifications.list",
+                "/messaging/channel-verifications",
+                Q::ScopedPage,
+            ),
+            S::Exists,
+            P::A4,
+        )
+        .risk(R::R1, V::OperationsMinimized)
+        .roles(&[L::VerificationReviewer, L::TrustSafety])
+        .purposes(&[U::VerificationReview, U::AbuseReview]),
+    );
+    c.push(
+        mg(
+            get(
+                "messaging.channel-reports.list",
+                "/messaging/channel-reports",
+                Q::ScopedPage,
+            ),
+            S::Exists,
+            P::A4,
+        )
+        .risk(R::R1, V::SafetyEvidence)
+        .roles(&[L::TrustSafety]),
+    );
+    c.push(
+        mg(
+            get(
+                "messaging.channels.read",
+                "/messaging/channels/{channel_id}",
+                Q::Scoped,
+            ),
+            S::Exists,
+            P::A4,
+        )
+        .uuid("channel_id")
+        .risk(R::R1, V::OperationsMinimized)
+        .roles(&[L::VerificationReviewer, L::TrustSafety])
+        .purposes(&[U::VerificationReview, U::AbuseReview]),
+    );
+    c.push(
+        mg(
+            get(
+                "messaging.channel-actions.list",
+                "/messaging/channel-actions",
+                Q::ScopedWindow,
+            ),
+            S::Exists,
+            P::A4,
+        )
+        .risk(R::R1, V::OperationsMinimized)
+        .roles(&[L::VerificationReviewer, L::TrustSafety])
+        .purposes(&[U::VerificationReview, U::AbuseReview]),
+    );
+    c.push(
+        mg(
+            cmd(
+                "messaging.channel-verification.decide",
+                "/messaging/channel-verifications/{application_id}/decide",
+            ),
+            S::Exists,
+            P::A4,
+        )
+        .uuid("application_id")
+        .risk(R::R3, V::OperationsMinimized)
+        .roles(&[L::VerificationReviewer])
+        .purposes(&[U::VerificationReview]),
+    );
+    c.push(
+        mg(
+            cmd(
+                "messaging.channel-verification.revoke",
+                "/messaging/channels/{channel_id}/verification/revoke",
+            ),
+            S::Exists,
+            P::A4,
+        )
+        .uuid("channel_id")
+        .risk(R::R3, V::OperationsMinimized)
+        .roles(&[L::VerificationReviewer, L::TrustSafety])
+        .purposes(&[U::VerificationReview, U::AbuseReview]),
+    );
+    c.push(
+        mg(
+            cmd(
+                "messaging.channel.moderate",
+                "/messaging/channels/{channel_id}/moderate",
+            ),
+            S::Exists,
+            P::A4,
+        )
+        .uuid("channel_id")
+        .risk(R::R3, V::SafetyEvidence)
+        .roles(&[L::TrustSafety]),
+    );
+    c.push(
+        mg(
+            cmd(
+                "messaging.channel-post.takedown",
+                "/messaging/channels/{channel_id}/posts/{post_id}/takedown",
+            ),
+            S::Exists,
+            P::A4,
+        )
+        .uuid("channel_id")
+        .uuid("post_id")
+        .risk(R::R3, V::SafetyEvidence)
+        .roles(&[L::TrustSafety]),
+    );
+    c.push(
+        mg(
+            cmd(
+                "messaging.channel-report.resolve",
+                "/messaging/channel-reports/{report_id}/resolve",
+            ),
+            S::Exists,
+            P::A4,
+        )
+        .uuid("report_id")
+        .risk(R::R3, V::SafetyEvidence)
+        .roles(&[L::TrustSafety]),
+    );
 
     // ---- 6.4 Calls (Calling) -----------------------------------------------------
     let cl = |b: B, st, ph| b.at(Calling, st, ph);
@@ -3664,6 +3791,27 @@ const SERVED_OWNER_READS: &[(&str, &str, &[&str])] = &[
         "messaging.key-transparency.read",
         "MessagingKeyTransparency",
         &["messaging_key_transparency_is_hashes_and_sizes_only"],
+    ),
+    // ADR 0072 Channels.
+    (
+        "messaging.channel-verifications.list",
+        "MessagingChannelVerificationPage",
+        &["messaging_channel_reads_relay_handles_and_counts_only"],
+    ),
+    (
+        "messaging.channel-reports.list",
+        "MessagingChannelReportPage",
+        &["messaging_channel_reads_relay_handles_and_counts_only"],
+    ),
+    (
+        "messaging.channels.read",
+        "MessagingChannel",
+        &["messaging_channel_reads_relay_handles_and_counts_only"],
+    ),
+    (
+        "messaging.channel-actions.list",
+        "MessagingChannelActionPage",
+        &["messaging_channel_actions_map_the_window"],
     ),
     // A2.7 Calling.
     (

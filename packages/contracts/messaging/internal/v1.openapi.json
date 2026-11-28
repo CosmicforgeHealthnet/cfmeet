@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Messaging internal API",
-    "version": "1.6.0",
+    "version": "1.7.0",
     "description": "Service-authenticated /internal/v1 surface of services/messaging (Part V H §§97–112, I §116). Every path, including unknown ones, requires a valid Ed25519 service token whose issuer Messaging's trust bundle grants the operation's permission; customer credentials are refused. Scope comes only from the signed delegated platform context, re-validated against Platform Access (forged chains: DELEGATED_CONTEXT_INVALID; suspended: AUTHORITY_SUSPENDED). In addition, /internal/v1/delegated/v1/messaging/** and /internal/v1/delegated/v1/conversations/** expose exactly the customer operations of cfmeet.messaging.http-api to a FIRST_PARTY backend granted messaging-application.delegate, with the standard scopes messages.send, messages.read, conversations.create, conversations.manage, attachments.write and attachments.read (never moderation, export or administration); CF-Acting-Principal is verified as on /v1. 1.1.0 (gap audit G6 / G7): organization moderation under /internal/v1/organization-moderation/v1/messaging/** and team channels (PUT /internal/v1/team-channels), permission messaging-organization.govern. 1.2.0 (ADR 0062 §8, partner meeting chat): the meeting-conversation operations also accept a Meeting Service holding messaging-meeting.sync-platform for an ACTIVE EXTERNAL environment's signed delegated scope (re-validated against Platform Access) while MESSAGING_PARTNER_SESSION_DEVICES_ENABLED is on; such a conversation is MANAGED only (SECURITY_PROFILE_NOT_ALLOWED / PARTNER_MEETING_CHAT_MANAGED_ONLY otherwise). First-party scopes keep requiring messaging-meeting.sync (sync-platform alone is INTERNAL_PERMISSION_DENIED there). In a partner scope the owner must be the environment's meeting system principal (BOT_OR_SERVICE; PRINCIPAL_NOT_AUTHORIZED / PARTNER_MEETING_OWNER_KIND) and admitted members EXTERNAL_APPLICATION_PRINCIPAL or TEMPORARY_EXTERNAL_PARTICIPANT principals of that environment (PARTNER_MEETING_MEMBER_KIND; another environment's principal is PRINCIPAL_UNKNOWN). 1.3.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every internal route from any other caller (403 INTERNAL_PERMISSION_DENIED); the admin bridge's operator reads GET /internal/v1/operator/reports, /reports/{reportId}, /holds, /exports, /deletion-requests, /audit, /switches, /incidents, /failed-messages and /key-transparency (messaging-firstparty.administer, cfmeet.admin-bridge only, plus X-CF-Operator): ids, categories, states, counts and times only, never content, ciphertext, keys, report evidence, audit detail, payloads, export object keys or case references. 1.4.0 (ADR 0068 A4 / A5 / A7, admin bridge commands): POST /internal/v1/operator/reports/{reportId}/remove-message, /reports/{reportId}/dismiss, /conversations/{conversationId}/members/{principalId}/mute and /remove, /conversations/{conversationId}/restrict, /policy, /holds, /holds/{holdId}/release, /deletion-requests, /switches/{switchName}, /incidents/{incidentId}/resolve, /failed-messages/{eventId}/retry and /key-transparency/checkpoint (Idempotency-Key; expectedVersion where the resource is versioned; X-CF-Approver for R3 / R4; answer {status, version, resource}); the settlement read GET /internal/v1/operator/operations/{idempotencyKey} (messaging_admin_operations, written in the change's transaction); GET /internal/v1/operator/policy, /conversations/{conversationId} and /conversations/{conversationId}/members/{principalId}; reports and holds carry their row version. 1.5.0 (ADR 0068 final round, owner-delivered exports): POST /internal/v1/operator/exports (messaging.export.request, R4) registers an export of a MANAGED conversation delivered ONLY to the verified recipient it names (never the tenant), answered with a reference (delivery OWNER_DELIVERED, deliveryChannel CONSOLE_REVEAL_ONCE, deliveryRef, exportState); GET /internal/v1/operator/exports/{exportId} reads its state; the A2 export list carries each export's delivery; the recipient lists and claims it once on the delegated mirror (GET /internal/v1/delegated/v1/messaging/export-deliveries, POST /internal/v1/delegated/v1/messaging/exports/{exportId}/claim). 1.6.0 (ADR 0068 A7, daily datasets): GET /internal/v1/operator/datasets/{datasetId}/days/{day} answers cfmeet.messaging_daily (messages_sent) and cfmeet.operations_health (failed_messages) for a UTC day: counts only, null when not computable."
   },
   "tags": [
@@ -3146,6 +3146,751 @@
           }
         }
       }
+    },
+    "/internal/v1/operator/channel-verifications": {
+      "get": {
+        "operationId": "operatorListChannelVerifications",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "List channel verification applications (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0072: verification applications, newest first, optionally by state; keyset-paged. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "PENDING",
+                "APPROVED",
+                "REJECTED",
+                "REVOKED"
+              ]
+            },
+            "description": "Report status."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "Page size (default 50)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{1,20}\\.[0-9a-f-]{36}$"
+            },
+            "description": "The nextCursor of the previous page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorChannelVerificationPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/channel-verifications/{applicationId}/decide": {
+      "post": {
+        "operationId": "operatorDecideChannelVerification",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Decide a channel verification (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "messaging.channel-verification.decide (R3): APPROVE grants the badge (the channel must be ACTIVE), REJECT closes the application; PENDING applications only, at the application's version. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED. Requires Idempotency-Key. The change and its operations-ledger record commit in one transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Refusals are definite 4xx and change nothing. Two-person (R3/R4): X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest are required.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorChannelDecideRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the answer of the first call with this key).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorChannelDecideResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/channel-reports": {
+      "get": {
+        "operationId": "operatorListChannelReports",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "List channel reports (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0072: channel and post reports, newest first, optionally by status; keyset-paged. No reporter, no note. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "OPEN",
+                "ACTIONED",
+                "DISMISSED"
+              ]
+            },
+            "description": "Report status."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "Page size (default 50)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{1,20}\\.[0-9a-f-]{36}$"
+            },
+            "description": "The nextCursor of the previous page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorChannelReportPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/channel-reports/{reportId}/resolve": {
+      "post": {
+        "operationId": "operatorResolveChannelReport",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Resolve a channel report (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "messaging.channel-report.resolve (R3): an OPEN report becomes ACTIONED or DISMISSED at its version. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED. Requires Idempotency-Key. The change and its operations-ledger record commit in one transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Refusals are definite 4xx and change nothing. Two-person (R3/R4): X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest are required.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "name": "reportId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorChannelResolveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the answer of the first call with this key).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorChannelResolveResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/channel-actions": {
+      "get": {
+        "operationId": "operatorListChannelActions",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "List channel moderation actions (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0072: HQ's channel actions, newest first; optional since / until window; keyset-paged. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Window start (at most 31 days with until)."
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Window end."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "Page size (default 50)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{1,20}\\.[0-9a-f-]{36}$"
+            },
+            "description": "The nextCursor of the previous page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorChannelActionPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/channels/{channelId}": {
+      "get": {
+        "operationId": "operatorGetChannel",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Read a channel (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0072: one channel's handle, codes, states, counts and version. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorChannel"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/channels/{channelId}/moderate": {
+      "post": {
+        "operationId": "operatorModerateChannel",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Moderate a channel (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "messaging.channel.moderate (R3): ACTIVE (reinstate), RESTRICTED (hidden from discovery, no new followers), SUSPENDED (only its admins read, nobody posts) or BANNED (only its owner reads) at the channel's version. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED. Requires Idempotency-Key. The change and its operations-ledger record commit in one transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Refusals are definite 4xx and change nothing. Two-person (R3/R4): X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest are required.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorChannelModerateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the answer of the first call with this key).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorChannelModerateResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/channels/{channelId}/verification/revoke": {
+      "post": {
+        "operationId": "operatorRevokeChannelVerification",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Revoke a channel's verification (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "messaging.channel-verification.revoke (R3): removes the badge of a verified channel at its version. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED. Requires Idempotency-Key. The change and its operations-ledger record commit in one transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Refusals are definite 4xx and change nothing. Two-person (R3/R4): X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest are required.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorVersionedReasonRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the answer of the first call with this key).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorChannelRevokeResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/channels/{channelId}/posts/{postId}/takedown": {
+      "post": {
+        "operationId": "operatorTakeDownChannelPost",
+        "tags": [
+          "Internal — HQ Admin Bridge"
+        ],
+        "summary": "Take down a channel post (admin bridge)",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "messaging.channel-post.takedown (R3): removes the post (its reactions, votes, views and stars) at the channel's version and actions its open reports. Permission messaging-firstparty.administer (cfmeet.admin-bridge only) and X-CF-Operator; otherwise 403 INTERNAL_PERMISSION_DENIED. Requires Idempotency-Key. The change and its operations-ledger record commit in one transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Refusals are definite 4xx and change nothing. Two-person (R3/R4): X-CF-Approver, X-CF-Approval-Ref and X-CF-Intent-Digest are required.",
+        "x-cfmeet-internal-permission": "messaging-firstparty.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Approver"
+          },
+          {
+            "$ref": "#/components/parameters/ApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/IntentDigest"
+          },
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "postId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorVersionedReasonRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or the answer of the first call with this key).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorChannelTakedownResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5975,6 +6720,868 @@
           }
         },
         "description": "Counts for one UTC day. A metric is null, never a guessed 0, when the day has not ended or its source did not exist for the whole day."
+      },
+      "OperatorChannelVerification": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "channelId",
+          "basis",
+          "state",
+          "decisionReason",
+          "decidedAt",
+          "createdAt",
+          "version",
+          "channelExists",
+          "handle",
+          "category",
+          "country",
+          "language",
+          "followerCount",
+          "postCount",
+          "channelCreatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "applicationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "channelId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "basis": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "state": {
+            "enum": [
+              "PENDING",
+              "APPROVED",
+              "REJECTED",
+              "REVOKED"
+            ]
+          },
+          "decisionReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "decidedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "channelExists": {
+            "type": "boolean"
+          },
+          "handle": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 32
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "country": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z]{2}$"
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 8
+          },
+          "followerCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "postCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "channelCreatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "description": "A verification application with the channel's public handle, codes and counts (never its name, description or posts)."
+      },
+      "OperatorChannelVerificationPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorChannelVerification"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "OperatorChannelReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "channelId",
+          "postId",
+          "category",
+          "status",
+          "resolution",
+          "resolvedAt",
+          "createdAt",
+          "version"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "applicationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "channelId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "postId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "category": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "status": {
+            "enum": [
+              "OPEN",
+              "ACTIONED",
+              "DISMISSED"
+            ]
+          },
+          "resolution": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "resolvedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "description": "A channel or post report: no reporter, no note."
+      },
+      "OperatorChannelReportPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorChannelReport"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "OperatorChannel": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "channelId",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "handle",
+          "category",
+          "country",
+          "language",
+          "visibility",
+          "moderationState",
+          "moderationReason",
+          "moderationChangedAt",
+          "verified",
+          "verifiedAt",
+          "followerCount",
+          "postCount",
+          "openReports",
+          "createdAt",
+          "version"
+        ],
+        "properties": {
+          "channelId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "applicationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "handle": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 32
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "country": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z]{2}$"
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 8
+          },
+          "visibility": {
+            "enum": [
+              "PUBLIC",
+              "PRIVATE"
+            ]
+          },
+          "moderationState": {
+            "enum": [
+              "ACTIVE",
+              "RESTRICTED",
+              "SUSPENDED",
+              "BANNED"
+            ]
+          },
+          "moderationReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "moderationChangedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "verifiedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "followerCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "postCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "openReports": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "description": "One channel's handle, codes, states, counts and row version (expectedVersion of the channel commands)."
+      },
+      "OperatorChannelAction": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "channelId",
+          "postId",
+          "reportId",
+          "verificationId",
+          "action",
+          "resultingState",
+          "reason",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "applicationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "channelId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "postId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "reportId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "verificationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "action": {
+            "enum": [
+              "VERIFY",
+              "REJECT_VERIFICATION",
+              "REVOKE_VERIFICATION",
+              "RESTRICT",
+              "SUSPEND",
+              "BAN",
+              "REINSTATE",
+              "TAKEDOWN",
+              "RESOLVE_REPORT"
+            ]
+          },
+          "resultingState": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "reason": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OperatorChannelActionPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorChannelAction"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "OperatorChannelDecideRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tenantId",
+          "expectedVersion",
+          "reasonCode",
+          "decision"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+          },
+          "decision": {
+            "enum": [
+              "APPROVE",
+              "REJECT"
+            ]
+          }
+        }
+      },
+      "OperatorChannelModerateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tenantId",
+          "expectedVersion",
+          "reasonCode",
+          "state"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+          },
+          "state": {
+            "enum": [
+              "ACTIVE",
+              "RESTRICTED",
+              "SUSPENDED",
+              "BANNED"
+            ]
+          }
+        }
+      },
+      "OperatorChannelResolveRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tenantId",
+          "expectedVersion",
+          "reasonCode",
+          "resolution"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,47}$"
+          },
+          "resolution": {
+            "enum": [
+              "ACTIONED",
+              "DISMISSED"
+            ]
+          }
+        }
+      },
+      "OperatorChannelDecideResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "APPROVED",
+              "REJECTED"
+            ]
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "applicationId",
+              "channelId",
+              "verificationState",
+              "verified",
+              "decidedAt"
+            ],
+            "properties": {
+              "applicationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "channelId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "verificationState": {
+                "enum": [
+                  "APPROVED",
+                  "REJECTED"
+                ]
+              },
+              "verified": {
+                "type": "boolean"
+              },
+              "decidedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      },
+      "OperatorChannelRevokeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "REVOKED"
+            ]
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "channelId",
+              "verificationState",
+              "verified",
+              "changedAt"
+            ],
+            "properties": {
+              "channelId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "verificationState": {
+                "enum": [
+                  "REVOKED"
+                ]
+              },
+              "verified": {
+                "type": "boolean"
+              },
+              "changedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      },
+      "OperatorChannelModerateResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "ACTIVE",
+              "RESTRICTED",
+              "SUSPENDED",
+              "BANNED"
+            ]
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "channelId",
+              "moderationState",
+              "moderationReason",
+              "changedAt"
+            ],
+            "properties": {
+              "channelId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "moderationState": {
+                "enum": [
+                  "ACTIVE",
+                  "RESTRICTED",
+                  "SUSPENDED",
+                  "BANNED"
+                ]
+              },
+              "moderationReason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "changedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      },
+      "OperatorChannelTakedownResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "TAKEN_DOWN"
+            ]
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "channelId",
+              "postId",
+              "takenDownAt"
+            ],
+            "properties": {
+              "channelId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "postId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "takenDownAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      },
+      "OperatorChannelResolveResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "version",
+          "resource"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "ACTIONED",
+              "DISMISSED"
+            ]
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "reportId",
+              "channelId",
+              "postId",
+              "reportStatus",
+              "resolvedAt"
+            ],
+            "properties": {
+              "reportId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "channelId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "postId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "reportStatus": {
+                "enum": [
+                  "ACTIONED",
+                  "DISMISSED"
+                ]
+              },
+              "resolvedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
       }
     },
     "parameters": {

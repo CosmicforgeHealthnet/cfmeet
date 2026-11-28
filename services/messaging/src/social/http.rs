@@ -7,7 +7,7 @@
 //! | `POST /status/{statusId}/view`, `PUT` / `DELETE /status/{statusId}/reaction`, `POST …/replies`, `POST …/forwards`, `POST …/reshares` | `messages.send` |
 //! | `GET` / `PUT /status/audience`, `GET /status/eligible-contacts`, `GET` / `PUT /status/close-friends`, audience lists, mutes | `messages.read` / `messages.send` |
 //! | Status media `…/status/media/**`, channel media `…/channels/media/**` | `messages.read` / `messages.send` |
-//! | Channels `…/channels/**` | `messages.read` / `messages.send` |
+//! | Channels `…/channels/**` (ADR 0072: discovery, admins, invites, posts, polls, scheduling, stars, reports, verification, analytics) | `messages.read` / `messages.send` |
 
 use axum::{
     body::Bytes,
@@ -79,6 +79,11 @@ pub fn routes() -> Router<AppState> {
         .route("/status/:status_id/reshares", post(reshare))
         .route("/channels", get(directory).post(create_channel))
         .route("/channels/following", get(following))
+        .route("/channels/suggestions", get(suggestions))
+        .route("/channels/lookup", get(lookup))
+        .route("/channels/starred", get(starred))
+        .route("/channels/invites/preview", post(invite_preview))
+        .route("/channels/invites/join", post(invite_join))
         .route("/channels/media", post(channel_media_create))
         .route(
             "/channels/media/:media_id",
@@ -103,15 +108,63 @@ pub fn routes() -> Router<AppState> {
                 .delete(delete_channel),
         )
         .route("/channels/:channel_id/follow", put(follow).delete(unfollow))
+        .route(
+            "/channels/:channel_id/mute",
+            put(mute_channel).delete(unmute_channel),
+        )
+        .route("/channels/:channel_id/admins", get(list_admins))
+        .route(
+            "/channels/:channel_id/admins/:principal_id",
+            put(put_admin).delete(remove_admin),
+        )
+        .route("/channels/:channel_id/owner", post(transfer_owner))
+        .route(
+            "/channels/:channel_id/invites",
+            get(list_invites).post(create_invite),
+        )
+        .route(
+            "/channels/:channel_id/invites/:invite_id",
+            axum::routing::delete(revoke_invite),
+        )
         .route("/channels/:channel_id/posts", get(posts).post(create_post))
+        .route("/channels/:channel_id/posts/views", post(record_views))
         .route(
             "/channels/:channel_id/posts/:post_id",
-            axum::routing::delete(delete_post),
+            axum::routing::patch(edit_post).delete(delete_post),
         )
         .route(
             "/channels/:channel_id/posts/:post_id/reaction",
             put(react_post).delete(unreact_post),
         )
+        .route(
+            "/channels/:channel_id/posts/:post_id/pin",
+            put(pin_post).delete(unpin_post),
+        )
+        .route(
+            "/channels/:channel_id/posts/:post_id/vote",
+            put(vote_post).delete(unvote_post),
+        )
+        .route(
+            "/channels/:channel_id/posts/:post_id/star",
+            put(star_post).delete(unstar_post),
+        )
+        .route(
+            "/channels/:channel_id/posts/:post_id/forwards",
+            post(forward_post),
+        )
+        .route("/channels/:channel_id/scheduled", get(scheduled_posts))
+        .route(
+            "/channels/:channel_id/scheduled/:post_id",
+            axum::routing::delete(cancel_scheduled),
+        )
+        .route("/channels/:channel_id/reports", post(report_channel))
+        .route(
+            "/channels/:channel_id/verification",
+            get(get_verification).post(apply_verification),
+        )
+        .route("/channels/:channel_id/moderation", get(moderation_history))
+        .route("/channels/:channel_id/audit", get(audit_log))
+        .route("/channels/:channel_id/analytics", get(analytics))
 }
 
 type Reply = Result<axum::response::Response, ApiError>;
@@ -628,21 +681,64 @@ async fn channel_media_grants(
 
 // --------------------------------------------------------------------------- channels
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct DirectoryQuery {
-    #[serde(default)]
-    q: Option<String>,
-}
-
 async fn directory(
     State(state): State<AppState>,
     caller: CustomerCaller,
     headers: HeaderMap,
-    Query(q): Query<DirectoryQuery>,
+    Query(q): Query<channels::DiscoverQuery>,
 ) -> Reply {
     let acting = reader(&state, &caller, &headers).await?;
-    ok(channels::directory(&state, caller.context(), &acting, q.q.as_deref()).await?)
+    ok(channels::directory(&state, caller.context(), &acting, q).await?)
+}
+
+async fn suggestions(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Query(q): Query<channels::SuggestQuery>,
+) -> Reply {
+    let acting = reader(&state, &caller, &headers).await?;
+    ok(channels::suggestions(&state, caller.context(), &acting, q).await?)
+}
+
+async fn lookup(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Query(q): Query<channels::LookupQuery>,
+) -> Reply {
+    let acting = reader(&state, &caller, &headers).await?;
+    ok(channels::lookup(&state, caller.context(), &acting, q).await?)
+}
+
+async fn starred(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Query(q): Query<channels::posts::StarredQuery>,
+) -> Reply {
+    let acting = reader(&state, &caller, &headers).await?;
+    ok(channels::posts::starred(&state, caller.context(), &acting, q).await?)
+}
+
+async fn invite_preview(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Json(body): Json<channels::admins::TokenRequest>,
+) -> Reply {
+    let acting = reader(&state, &caller, &headers).await?;
+    ok(channels::admins::preview(&state, caller.context(), &acting, body).await?)
+}
+
+async fn invite_join(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Json(body): Json<channels::admins::TokenRequest>,
+) -> Reply {
+    let acting = writer(&state, &caller, &headers).await?;
+    ok(channels::admins::join(&state, caller.context(), &acting, body).await?)
 }
 
 async fn create_channel(
@@ -718,6 +814,103 @@ async fn unfollow(
     ok(channels::set_following(&state, caller.context(), &acting, id, false).await?)
 }
 
+async fn mute_channel(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Reply {
+    let acting = writer(&state, &caller, &headers).await?;
+    ok(channels::set_muted(&state, caller.context(), &acting, id, true).await?)
+}
+
+async fn unmute_channel(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Reply {
+    let acting = writer(&state, &caller, &headers).await?;
+    ok(channels::set_muted(&state, caller.context(), &acting, id, false).await?)
+}
+
+async fn list_admins(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Reply {
+    let acting = reader(&state, &caller, &headers).await?;
+    ok(channels::admins::list(&state, caller.context(), &acting, id).await?)
+}
+
+async fn put_admin(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path((id, who)): Path<(Uuid, Uuid)>,
+    Json(body): Json<channels::admins::AdminRequest>,
+) -> Reply {
+    let acting = writer(&state, &caller, &headers).await?;
+    ok(channels::admins::put(&state, caller.context(), &acting, id, who, body).await?)
+}
+
+async fn remove_admin(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path((id, who)): Path<(Uuid, Uuid)>,
+) -> Reply {
+    let acting = writer(&state, &caller, &headers).await?;
+    ok(channels::admins::remove(&state, caller.context(), &acting, id, who).await?)
+}
+
+async fn transfer_owner(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(body): Json<channels::admins::TransferRequest>,
+) -> Reply {
+    let acting = writer(&state, &caller, &headers).await?;
+    ok(channels::admins::transfer(&state, caller.context(), &acting, id, body).await?)
+}
+
+async fn list_invites(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Reply {
+    let acting = reader(&state, &caller, &headers).await?;
+    ok(channels::admins::invites(&state, caller.context(), &acting, id).await?)
+}
+
+async fn create_invite(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    body: Bytes,
+) -> Reply {
+    let acting = writer(&state, &caller, &headers).await?;
+    let body: channels::admins::InviteRequest = optional(&body)?;
+    with_status(
+        201,
+        channels::admins::create_invite(&state, caller.context(), &acting, id, body).await?,
+    )
+}
+
+async fn revoke_invite(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path((id, invite)): Path<(Uuid, Uuid)>,
+) -> Reply {
+    let acting = writer(&state, &caller, &headers).await?;
+    ok(channels::admins::revoke_invite(&state, caller.context(), &acting, id, invite).await?)
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PostsQuery {
@@ -747,6 +940,28 @@ async fn create_post(
     let key = idempotency_key(&headers)?;
     let (s, v) = channels::create_post(&state, caller.context(), &acting, id, body, key).await?;
     with_status(s, v)
+}
+
+async fn record_views(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(body): Json<channels::posts::ViewsRequest>,
+) -> Reply {
+    let acting = writer(&state, &caller, &headers).await?;
+    ok(channels::posts::record_views(&state, caller.context(), &acting, id, body).await?)
+}
+
+async fn edit_post(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path((id, post)): Path<(Uuid, Uuid)>,
+    Json(body): Json<channels::posts::EditRequest>,
+) -> Reply {
+    let acting = writer(&state, &caller, &headers).await?;
+    ok(channels::posts::edit_post(&state, caller.context(), &acting, id, post, body).await?)
 }
 
 async fn delete_post(
@@ -786,4 +1001,162 @@ async fn unreact_post(
 ) -> Reply {
     let acting = writer(&state, &caller, &headers).await?;
     ok(channels::react(&state, caller.context(), &acting, id, post, None).await?)
+}
+
+async fn pin_post(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path((id, post)): Path<(Uuid, Uuid)>,
+) -> Reply {
+    let acting = writer(&state, &caller, &headers).await?;
+    ok(channels::posts::set_pinned(&state, caller.context(), &acting, id, post, true).await?)
+}
+
+async fn unpin_post(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path((id, post)): Path<(Uuid, Uuid)>,
+) -> Reply {
+    let acting = writer(&state, &caller, &headers).await?;
+    ok(channels::posts::set_pinned(&state, caller.context(), &acting, id, post, false).await?)
+}
+
+async fn vote_post(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path((id, post)): Path<(Uuid, Uuid)>,
+    Json(body): Json<channels::posts::VoteRequest>,
+) -> Reply {
+    let acting = writer(&state, &caller, &headers).await?;
+    ok(channels::posts::vote(&state, caller.context(), &acting, id, post, Some(body)).await?)
+}
+
+async fn unvote_post(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path((id, post)): Path<(Uuid, Uuid)>,
+) -> Reply {
+    let acting = writer(&state, &caller, &headers).await?;
+    ok(channels::posts::vote(&state, caller.context(), &acting, id, post, None).await?)
+}
+
+async fn star_post(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path((id, post)): Path<(Uuid, Uuid)>,
+) -> Reply {
+    let acting = writer(&state, &caller, &headers).await?;
+    ok(channels::posts::set_starred(&state, caller.context(), &acting, id, post, true).await?)
+}
+
+async fn unstar_post(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path((id, post)): Path<(Uuid, Uuid)>,
+) -> Reply {
+    let acting = writer(&state, &caller, &headers).await?;
+    ok(channels::posts::set_starred(&state, caller.context(), &acting, id, post, false).await?)
+}
+
+async fn forward_post(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path((id, post)): Path<(Uuid, Uuid)>,
+    Json(body): Json<channels::posts::ForwardRequest>,
+) -> Reply {
+    let acting = writer(&state, &caller, &headers).await?;
+    ok(channels::posts::forward(&state, caller.context(), &acting, id, post, body).await?)
+}
+
+async fn scheduled_posts(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Reply {
+    let acting = reader(&state, &caller, &headers).await?;
+    ok(channels::posts::scheduled(&state, caller.context(), &acting, id).await?)
+}
+
+async fn cancel_scheduled(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path((id, post)): Path<(Uuid, Uuid)>,
+) -> Reply {
+    let acting = writer(&state, &caller, &headers).await?;
+    ok(channels::posts::cancel_scheduled(&state, caller.context(), &acting, id, post).await?)
+}
+
+async fn report_channel(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(body): Json<channels::safety::ReportRequest>,
+) -> Reply {
+    let acting = writer(&state, &caller, &headers).await?;
+    let (s, v) = channels::safety::report(&state, caller.context(), &acting, id, body).await?;
+    with_status(s, v)
+}
+
+async fn get_verification(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Reply {
+    let acting = reader(&state, &caller, &headers).await?;
+    ok(channels::safety::verification(&state, caller.context(), &acting, id).await?)
+}
+
+async fn apply_verification(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(body): Json<channels::safety::VerificationRequest>,
+) -> Reply {
+    let acting = writer(&state, &caller, &headers).await?;
+    let (s, v) = channels::safety::apply(&state, caller.context(), &acting, id, body).await?;
+    with_status(s, v)
+}
+
+async fn moderation_history(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Reply {
+    let acting = reader(&state, &caller, &headers).await?;
+    ok(channels::safety::moderation(&state, caller.context(), &acting, id).await?)
+}
+
+async fn audit_log(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Query(q): Query<channels::admins::AuditQuery>,
+) -> Reply {
+    let acting = reader(&state, &caller, &headers).await?;
+    ok(channels::admins::audit_log(&state, caller.context(), &acting, id, q).await?)
+}
+
+async fn analytics(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Query(q): Query<channels::analytics::AnalyticsQuery>,
+) -> Reply {
+    let acting = reader(&state, &caller, &headers).await?;
+    ok(channels::analytics::analytics(&state, caller.context(), &acting, id, q).await?)
 }

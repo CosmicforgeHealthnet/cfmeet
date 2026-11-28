@@ -1033,7 +1033,9 @@ pub static ROUTES: &[RelayRoute] = &[
     r(
         Method::GET,
         &[Lit("messaging"), Lit("channels")],
-        &["q"],
+        &[
+            "q", "category", "country", "language", "sort", "cursor", "limit",
+        ],
         false,
     ),
     r(
@@ -1120,6 +1122,288 @@ pub static ROUTES: &[RelayRoute] = &[
             Lit("reaction"),
         ],
         &[],
+        false,
+    ),
+    // ADR 0072: PATCH /v1/messaging/channels/{channelId}/posts/{postId}
+    r(
+        Method::PATCH,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("posts"), Id],
+        &[],
+        false,
+    ),
+    // ADR 0072: GET /v1/messaging/channels/suggestions
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Lit("suggestions")],
+        &["q"],
+        false,
+    ),
+    // ADR 0072: GET /v1/messaging/channels/lookup
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Lit("lookup")],
+        &["handle"],
+        false,
+    ),
+    // ADR 0072: GET /v1/messaging/channels/starred
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Lit("starred")],
+        &["cursor", "limit"],
+        false,
+    ),
+    // ADR 0072: POST /v1/messaging/channels/invites/preview
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Lit("invites"),
+            Lit("preview"),
+        ],
+        &[],
+        false,
+    ),
+    // ADR 0072: POST /v1/messaging/channels/invites/join
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Lit("invites"),
+            Lit("join"),
+        ],
+        &[],
+        false,
+    ),
+    // ADR 0072: PUT /v1/messaging/channels/{channelId}/mute
+    r(
+        Method::PUT,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("mute")],
+        &[],
+        false,
+    ),
+    // ADR 0072: DELETE /v1/messaging/channels/{channelId}/mute
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("mute")],
+        &[],
+        false,
+    ),
+    // ADR 0072: GET /v1/messaging/channels/{channelId}/admins
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("admins")],
+        &[],
+        false,
+    ),
+    // ADR 0072: PUT /v1/messaging/channels/{channelId}/admins/{principalId}
+    r(
+        Method::PUT,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("admins"), Id],
+        &[],
+        false,
+    ),
+    // ADR 0072: DELETE /v1/messaging/channels/{channelId}/admins/{principalId}
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("admins"), Id],
+        &[],
+        false,
+    ),
+    // ADR 0072: POST /v1/messaging/channels/{channelId}/owner
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("owner")],
+        &[],
+        false,
+    ),
+    // ADR 0072: GET /v1/messaging/channels/{channelId}/invites
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("invites")],
+        &[],
+        false,
+    ),
+    // ADR 0072: POST /v1/messaging/channels/{channelId}/invites
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("invites")],
+        &[],
+        false,
+    ),
+    // ADR 0072: DELETE /v1/messaging/channels/{channelId}/invites/{inviteId}
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("invites"), Id],
+        &[],
+        false,
+    ),
+    // ADR 0072: POST /v1/messaging/channels/{channelId}/posts/views
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Id,
+            Lit("posts"),
+            Lit("views"),
+        ],
+        &[],
+        false,
+    ),
+    // ADR 0072: PUT /v1/messaging/channels/{channelId}/posts/{postId}/pin
+    r(
+        Method::PUT,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Id,
+            Lit("posts"),
+            Id,
+            Lit("pin"),
+        ],
+        &[],
+        false,
+    ),
+    // ADR 0072: DELETE /v1/messaging/channels/{channelId}/posts/{postId}/pin
+    r(
+        Method::DELETE,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Id,
+            Lit("posts"),
+            Id,
+            Lit("pin"),
+        ],
+        &[],
+        false,
+    ),
+    // ADR 0072: PUT /v1/messaging/channels/{channelId}/posts/{postId}/vote
+    r(
+        Method::PUT,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Id,
+            Lit("posts"),
+            Id,
+            Lit("vote"),
+        ],
+        &[],
+        false,
+    ),
+    // ADR 0072: DELETE /v1/messaging/channels/{channelId}/posts/{postId}/vote
+    r(
+        Method::DELETE,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Id,
+            Lit("posts"),
+            Id,
+            Lit("vote"),
+        ],
+        &[],
+        false,
+    ),
+    // ADR 0072: PUT /v1/messaging/channels/{channelId}/posts/{postId}/star
+    r(
+        Method::PUT,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Id,
+            Lit("posts"),
+            Id,
+            Lit("star"),
+        ],
+        &[],
+        false,
+    ),
+    // ADR 0072: DELETE /v1/messaging/channels/{channelId}/posts/{postId}/star
+    r(
+        Method::DELETE,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Id,
+            Lit("posts"),
+            Id,
+            Lit("star"),
+        ],
+        &[],
+        false,
+    ),
+    // ADR 0072: POST /v1/messaging/channels/{channelId}/posts/{postId}/forwards
+    r(
+        Method::POST,
+        &[
+            Lit("messaging"),
+            Lit("channels"),
+            Id,
+            Lit("posts"),
+            Id,
+            Lit("forwards"),
+        ],
+        &[],
+        false,
+    ),
+    // ADR 0072: GET /v1/messaging/channels/{channelId}/scheduled
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("scheduled")],
+        &[],
+        false,
+    ),
+    // ADR 0072: DELETE /v1/messaging/channels/{channelId}/scheduled/{postId}
+    r(
+        Method::DELETE,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("scheduled"), Id],
+        &[],
+        false,
+    ),
+    // ADR 0072: POST /v1/messaging/channels/{channelId}/reports
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("reports")],
+        &[],
+        false,
+    ),
+    // ADR 0072: GET /v1/messaging/channels/{channelId}/verification
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("verification")],
+        &[],
+        false,
+    ),
+    // ADR 0072: POST /v1/messaging/channels/{channelId}/verification
+    r(
+        Method::POST,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("verification")],
+        &[],
+        false,
+    ),
+    // ADR 0072: GET /v1/messaging/channels/{channelId}/moderation
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("moderation")],
+        &[],
+        false,
+    ),
+    // ADR 0072: GET /v1/messaging/channels/{channelId}/audit
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("audit")],
+        &["cursor", "limit"],
+        false,
+    ),
+    // ADR 0072: GET /v1/messaging/channels/{channelId}/analytics
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("channels"), Id, Lit("analytics")],
+        &["from", "to"],
         false,
     ),
 ];
@@ -1629,6 +1913,13 @@ mod tests {
                 format!("v1/messaging/channels/media/{C}/parts/63"),
             ),
             (Method::PUT, format!("v1/messaging/channels/{C}/follow")),
+            (Method::GET, "v1/messaging/channels/suggestions".into()),
+            (Method::POST, "v1/messaging/channels/invites/join".into()),
+            (
+                Method::PUT,
+                format!("v1/messaging/channels/{C}/posts/{C}/vote"),
+            ),
+            (Method::GET, format!("v1/messaging/channels/{C}/analytics")),
             (
                 Method::PUT,
                 format!("v1/messaging/history-transfers/{C}/sealed-history"),
