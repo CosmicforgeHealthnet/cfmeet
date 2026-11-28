@@ -43,6 +43,8 @@ pub const RELEASE_OPERATIONS: &[&str] = &[
     "org-cutover-shadow",
     "org-cutover-authoritative",
     "org-cutover-first-activation",
+    "social-channels-export",
+    "social-channels-import",
     "activate-enterprise-calling",
     "activate-developer-platform",
     "activate-gateway-routing",

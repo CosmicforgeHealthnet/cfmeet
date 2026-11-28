@@ -29,7 +29,7 @@ analytics, reports, and verification and moderation that only HQ decides.
    its owner only. A private channel is joined only through an invite link.
 3. **Handles.** Unique per environment, 5–32 of `a-z 0-9 _` starting with a letter
    (normalized from `@Name`), reserved words (`admin`, `support`, … and anything containing
-   `cfmeet`, `cosmicforge`, `official`, `verified`) refused. Only the owner sets or changes
+   `cfmeet`, `official`, `verified`) refused. Only the owner sets or changes
    it; a verified channel keeps its handle. Category (closed list), BCP 47 language and
    ISO 3166-1 country are optional codes; the picture is a COMPLETE channel image upload.
 4. **Admins.** The owner holds every permission; an admin holds any of `canPost` (post,

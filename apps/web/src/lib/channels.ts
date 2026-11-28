@@ -49,7 +49,7 @@ const RESERVED = new Set([
   "status", "updates", "meet", "meeting", "meetings", "null", "undefined", "everyone", "here", "owner", "team", "trust",
   "safety", "abuse", "report", "reports", "notifications",
 ]);
-const RESERVED_WORDS = ["cfmeet", "cosmicforge", "official", "verified"];
+const RESERVED_WORDS = ["cfmeet", "official", "verified"];
 
 /** The canonical spelling of a typed username (`@Daily_News` → `daily_news`). */
 export function normalizeHandle(raw: string): string {

@@ -130,7 +130,7 @@ pub const RESERVED_HANDLES: &[&str] = &[
     "reports",
     "notifications",
 ];
-const RESERVED_WORDS: &[&str] = &["cfmeet", "cosmicforge", "official", "verified"];
+const RESERVED_WORDS: &[&str] = &["cfmeet", "official", "verified"];
 
 // ------------------------------------------------------------------------------ rows
 
