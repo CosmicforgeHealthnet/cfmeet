@@ -87,6 +87,20 @@ async fn env() -> Option<Env> {
     Some(Env { h, store, scanner })
 }
 
+/// An environment whose MANAGED media is a delivery copy kept `days` after upload.
+async fn env_retaining(days: i64) -> Option<Env> {
+    let store = Arc::new(MemoryObjectStore::new());
+    let scanner = ScriptedScanner::new(ScanOutcome::Clean);
+    let (s2, sc2) = (store.clone(), scanner.clone());
+    let h = Harness::build(move |s| {
+        s.storage = s2;
+        s.scanner = sc2;
+        s.attachments.managed_media_retention = Some(chrono::Duration::days(days));
+    })
+    .await?;
+    Some(Env { h, store, scanner })
+}
+
 const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89";
 
 fn png(n: usize) -> Vec<u8> {
@@ -3300,6 +3314,75 @@ async fn cfmeet_uploaders_have_a_daily_volume() {
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
 }
 
+#[tokio::test]
+async fn managed_media_is_a_delivery_copy_deleted_after_retention() {
+    let Some(e) = env_retaining(14).await else {
+        return;
+    };
+    let c = e.h.customer(ALL_SCOPES);
+    e.policy(&c, json!({})).await;
+    let (conv, people) = e.managed_group(&c, 2).await;
+    let (alice, bob) = (people[0], people[1]);
+    let id = cid(&conv);
+    let up = e
+        .managed_upload(
+            &c,
+            &conv,
+            alice,
+            "IMAGE",
+            "image/png",
+            "photo.png",
+            &png(800),
+        )
+        .await;
+    assert_eq!(up.json["state"], "READY", "{}", up.text);
+    let aid = up.json["attachmentId"].clone();
+    let sent =
+        e.h.post(
+            &c,
+            Some(alice),
+            &format!("/v1/conversations/{id}/messages"),
+            json!({ "clientMessageId": Uuid::new_v4(), "text": "look", "attachmentIds": [aid] }),
+        )
+        .await;
+    assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
+
+    // Inside the window the recipient can still fetch it.
+    e.h.clock.advance(chrono::Duration::days(13));
+    let report = lifecycle::run_once(&e.h.state).await.unwrap();
+    assert_eq!(report.media_expired, 0);
+    assert_eq!(e.grant(&c, &conv, bob, &aid).await.status, StatusCode::OK);
+
+    // After it, the server copy is deleted and its object removed; the message stays.
+    e.h.clock.advance(chrono::Duration::days(2));
+    let report = lifecycle::run_once(&e.h.state).await.unwrap();
+    assert_eq!(report.media_expired, 1);
+    assert!(report.deleted_objects >= 1, "{report:?}");
+    assert_ne!(e.grant(&c, &conv, bob, &aid).await.status, StatusCode::OK);
+    let state = e
+        .h
+        .scalar(&format!(
+            "SELECT count(*) FROM messaging_attachments WHERE id = '{}' AND state = 'DELETED' AND state_reason = 'MEDIA_RETENTION'",
+            aid.as_str().unwrap()
+        ))
+        .await;
+    assert_eq!(state, 1, "deleted for retention");
+    let listed =
+        e.h.get(
+            &c,
+            Some(bob),
+            &format!("/v1/conversations/{id}/messages?afterSequence=0&limit=50"),
+        )
+        .await;
+    assert_eq!(listed.status, StatusCode::OK, "{}", listed.text);
+    assert!(
+        listed
+            .text
+            .contains(sent.json["messageId"].as_str().unwrap()),
+        "the message itself is kept"
+    );
+}
+
 /// A MANAGED group's photo is an image attachment of the group itself
 /// (`avatarRef: attachment:<id>`): a group admin sets it, every member can read it, it is
 /// not removed as an abandoned upload while it is the avatar, and anything but a READY
@@ -3417,4 +3500,61 @@ async fn a_group_photo_is_an_attachment_every_member_reads() {
         )
         .await;
     assert_eq!(r.reason(), "NOT_ADMIN", "{}", r.text);
+}
+
+/// A photo that was sent in a message and is now the group's photo is not deleted by
+/// MANAGED media retention while it is the avatar.
+#[tokio::test]
+async fn managed_media_retention_keeps_the_current_group_photo() {
+    let Some(e) = env_retaining(14).await else {
+        return;
+    };
+    let c = e.h.customer(ALL_SCOPES);
+    e.policy(&c, json!({ "managedScanRequired": false })).await;
+    let (conv, people) = e.managed_group(&c, 2).await;
+    let (owner, member) = (people[0], people[1]);
+    let id = cid(&conv);
+    let up = e
+        .managed_upload(
+            &c,
+            &conv,
+            owner,
+            "IMAGE",
+            "image/png",
+            "group.png",
+            &png(64),
+        )
+        .await;
+    assert_eq!(up.json["state"], "READY", "{}", up.text);
+    let aid = up.json["attachmentId"].clone();
+    let sent =
+        e.h.post(
+            &c,
+            Some(owner),
+            &format!("/v1/conversations/{id}/messages"),
+            json!({ "clientMessageId": Uuid::new_v4(), "text": "new photo", "attachmentIds": [aid] }),
+        )
+        .await;
+    assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
+    let version =
+        e.h.get(&c, Some(owner), &format!("/v1/conversations/{id}"))
+            .await
+            .json["version"]
+            .as_i64()
+            .unwrap();
+    let avatar = format!("attachment:{}", aid.as_str().unwrap());
+    let r =
+        e.h.patch(
+            &c,
+            Some(owner),
+            &format!("/v1/conversations/{id}"),
+            json!({ "expectedVersion": version, "avatarRef": avatar }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+
+    e.h.clock.advance(chrono::Duration::days(15));
+    let report = lifecycle::run_once(&e.h.state).await.unwrap();
+    assert_eq!(report.media_expired, 0, "{report:?}");
+    assert!(e.grant(&c, &conv, member, &aid).await.status.is_success());
 }
