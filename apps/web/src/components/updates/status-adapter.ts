@@ -1,12 +1,11 @@
-// Text statuses between the editor (TextStatus) and the status API. Today's API stores text,
-// one #RRGGBB background and a font 0-4; the richer fields (text colour, alignment, size step,
-// gradient) are carried by TextStatusExtras and sent once CreateStatus / StatusPost have them.
+// Text statuses between the editor (TextStatus) and the status API: text, a #RRGGBB background
+// and a font 0-4, plus the richer look (text colour, alignment, size step, gradient).
 import type { CreateStatus, StatusPost } from "@/services/v2/social.service";
 import { clampFont, representativeColor, type Gradient, type TextStatus, type TextStatusInput } from "@/lib/media-editor/text-status";
 
 export type CreateTextStatus = Extract<CreateStatus, { kind: "TEXT" }>;
 
-/** Fields the status API is gaining; not sent yet. */
+/** A text status's richer look. */
 export interface TextStatusExtras {
   textColor: string;
   textAlign: TextStatus["textAlign"];
@@ -19,7 +18,15 @@ export function textStatusToCreate(s: TextStatus): CreateTextStatus {
   return { kind: "TEXT", text: s.text, background: representativeColor(s), font: clampFont(s.font) };
 }
 
-/** The richer fields, for when the API takes them: `{ ...textStatusToCreate(s), ...textStatusExtras(s) }`. */
+/**
+ * The queue item for a text status with its full look (contract 1.25+: textColor, textAlign,
+ * textSize 0-4, backgroundGradient; `background` stays the representative colour for cards).
+ */
+export function textStatusItem(s: TextStatus): { kind: "TEXT"; text: string; background: string; font: number } & TextStatusExtras {
+  return { kind: "TEXT", text: s.text, background: representativeColor(s), font: clampFont(s.font), ...textStatusExtras(s), textSize: Math.max(0, Math.min(4, Math.round(s.textSize))) };
+}
+
+/** The richer fields: `{ ...textStatusToCreate(s), ...textStatusExtras(s) }`. */
 export function textStatusExtras(s: TextStatus): TextStatusExtras {
   return { textColor: s.textColor, textAlign: s.textAlign, textSize: s.textSize, ...(s.backgroundGradient ? { backgroundGradient: s.backgroundGradient } : {}) };
 }

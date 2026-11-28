@@ -411,10 +411,11 @@ async function upload(file: Blob, purpose: MediaPurpose, kind: MediaKind, durati
   }
 }
 
-const blobs = new Map<string, Promise<string>>();
+const blobs = new Map<string, Promise<Blob>>();
+const urls = new Map<string, Promise<string>>();
 
-/** An object URL for a photo / video / voice note (downloaded once per page; the server authorizes every read). */
-export function mediaUrl(media: MediaView): Promise<string> {
+/** A photo / video / voice note's bytes (downloaded once per page; the server authorizes every read). */
+export function mediaBlob(media: MediaView): Promise<Blob> {
   let hit = blobs.get(media.mediaId);
   if (!hit) {
     hit = (async () => {
@@ -425,10 +426,21 @@ export function mediaUrl(media: MediaView): Promise<string> {
         if (!r.ok) throw new MessagingApiError(r.status, "DOWNLOAD_FAILED", null);
         return r.arrayBuffer();
       }));
-      return URL.createObjectURL(new Blob(parts, { type: grant.contentType || media.contentType }));
+      return new Blob(parts, { type: grant.contentType || media.contentType });
     })();
     hit.catch(() => blobs.delete(media.mediaId));
     blobs.set(media.mediaId, hit);
+  }
+  return hit;
+}
+
+/** An object URL for a photo / video / voice note (one per media for the page's life). */
+export function mediaUrl(media: MediaView): Promise<string> {
+  let hit = urls.get(media.mediaId);
+  if (!hit) {
+    hit = mediaBlob(media).then((b) => URL.createObjectURL(b));
+    hit.catch(() => urls.delete(media.mediaId));
+    urls.set(media.mediaId, hit);
   }
   return hit;
 }

@@ -1,13 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, BellOff, Bell, Eye, Forward, MoreVertical, Mic, Repeat2, Send, SmilePlus, Star, Trash2, X } from "lucide-react";
+import { ArrowLeft, BellOff, Bell, Eye, Forward, MoreVertical, Mic, Music2, Repeat2, Send, SmilePlus, Star, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/toast";
 import { useEligibleContacts, useMediaUrl, useStatusViewers } from "@/hooks/v2/useSocial";
-import { socialService, type PersonView, type StatusPost } from "@/services/v2/social.service";
+import { mediaBlob, socialService, type MediaView, type PersonView, type StatusPost } from "@/services/v2/social.service";
 import { canShare, reactionSummary, uniqueViewers } from "@/lib/status-privacy";
 import TextStatusView from "@/components/media-editor/TextStatusView";
+import Waveform from "@/components/media-editor/Waveform";
+import { audioPeaks } from "@/lib/media-editor/audio-render";
+import { gradientCss } from "@/lib/media-editor/text-status";
 import { AudienceButton, Overlay, PeopleChecklist, useStatusAudience } from "./audience";
 import { errorText, PersonAvatar, whenText } from "./shared";
 import { textStatusOfPost } from "./status-adapter";
@@ -40,6 +43,10 @@ export default function StatusViewer({ person, posts, mine, startAt = 0, muted, 
   const [isMuted, setMuted] = useState(!!muted);
   const post = posts[index];
   const { url } = useMediaUrl(post?.media);
+  // Music on a text / photo status plays with it (from its range, looping) while it is shown.
+  const withMusic = post && (post.kind === "TEXT" || post.kind === "IMAGE") && post.music ? post.music : null;
+  const { url: musicUrl } = useMediaUrl(withMusic?.media ?? null);
+  const musicEl = useRef<HTMLAudioElement | null>(null);
   const media = useRef<HTMLVideoElement | HTMLAudioElement | null>(null);
   const seen = useRef(new Set<string>());
 
@@ -58,7 +65,10 @@ export default function StatusViewer({ person, posts, mine, startAt = 0, muted, 
   useEffect(() => {
     if (!post || post.kind === "VIDEO" || post.kind === "AUDIO" || hold) return;
     if (post.kind === "IMAGE" && !url) return;
-    const total = post.kind === "TEXT" ? Math.min(10_000, 4000 + (post.text?.length ?? 0) * 40) : PHOTO_MS;
+    const base = post.kind === "TEXT" ? Math.min(10_000, 4000 + (post.text?.length ?? 0) * 40) : PHOTO_MS;
+    // With music the status stays up for the clip (at most a minute).
+    const musicMs = withMusic ? (withMusic.endMs !== null && withMusic.startMs !== null ? withMusic.endMs - withMusic.startMs : withMusic.media?.durationMs ?? 0) : 0;
+    const total = Math.min(60_000, Math.max(base, musicMs));
     const started = Date.now() - progress * total;
     const t = setInterval(() => {
       const p = (Date.now() - started) / total;
@@ -69,10 +79,11 @@ export default function StatusViewer({ person, posts, mine, startAt = 0, muted, 
   }, [post?.postId, hold, url]);
 
   useEffect(() => {
-    const el = media.current;
-    if (!el) return;
-    if (hold) el.pause(); else void el.play().catch(() => {});
-  }, [hold, url]);
+    for (const el of [media.current, musicEl.current]) {
+      if (!el) continue;
+      if (hold) el.pause(); else void el.play().catch(() => {});
+    }
+  }, [hold, url, musicUrl]);
 
   if (!post) return null;
   const start = (post.startMs ?? 0) / 1000;
@@ -198,11 +209,22 @@ export default function StatusViewer({ person, posts, mine, startAt = 0, muted, 
           <video key={post.postId} ref={(el) => { media.current = el; }} src={url} playsInline autoPlay className="max-h-full max-w-full"
             onLoadedMetadata={(e) => { e.currentTarget.currentTime = start; }} onTimeUpdate={onTime} onEnded={next} />
         ) : (
-          <div className="flex size-full flex-col items-center justify-center gap-6" style={{ backgroundColor: post.background ?? "#128C7E" }}>
-            <span className="flex size-24 items-center justify-center rounded-full bg-black/30"><Mic className="size-10" /></span>
+          <div className="flex size-full flex-col items-center justify-center gap-6 px-8" style={{ background: post.backgroundGradient ? gradientCss(post.backgroundGradient) : post.background ?? "#128C7E" }} data-testid={post.musicTitle ? "status-music" : "status-voice"}>
+            <span className="flex size-24 items-center justify-center rounded-full bg-black/30">{post.musicTitle ? <Music2 className={cn("size-10", !hold && "animate-pulse")} /> : <Mic className="size-10" />}</span>
+            {post.musicTitle ? <p className="max-w-xs truncate text-center text-lg font-semibold drop-shadow">{post.musicTitle}</p> : <VoiceWave media={post.media} progress={progress} />}
             <audio key={post.postId} ref={(el) => { media.current = el; }} src={url} autoPlay onTimeUpdate={onTime} onEnded={next} />
           </div>
         )}
+        {withMusic && musicUrl ? (
+          <>
+            <audio key={`${post.postId}-music`} ref={(el) => { musicEl.current = el; }} src={musicUrl} autoPlay loop
+              onLoadedMetadata={(e) => { if (withMusic.startMs) e.currentTarget.currentTime = withMusic.startMs / 1000; }}
+              onTimeUpdate={(e) => { if (withMusic.endMs !== null && e.currentTarget.currentTime * 1000 >= withMusic.endMs) e.currentTarget.currentTime = (withMusic.startMs ?? 0) / 1000; }} />
+            <span className="pointer-events-none absolute left-1/2 top-28 z-10 flex max-w-[80%] -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/50 px-3 py-1 text-xs font-semibold" data-testid="status-music-chip">
+              <Music2 className="size-3.5 shrink-0" /><span className="truncate">{withMusic.title ?? post.musicTitle ?? "Music"}</span>
+            </span>
+          </>
+        ) : null}
         {post.caption ? <p className="absolute inset-x-0 bottom-4 mx-4 rounded-xl bg-black/50 px-4 py-3 text-center text-base">{post.caption}</p> : null}
         <button type="button" aria-label="Previous" className="absolute inset-y-0 left-0 w-1/3" onClick={prev} />
         <button type="button" aria-label="Next" className="absolute inset-y-0 right-0 w-1/3" onClick={next} />
@@ -244,6 +266,19 @@ export default function StatusViewer({ person, posts, mine, startAt = 0, muted, 
       {panel === "reshare" ? <ReshareSheet post={post} onClose={() => setPanel(null)} onDone={() => { setPanel(null); onChanged(); }} /> : null}
     </div>
   );
+}
+
+/** A voice status's waveform, filling as it plays. */
+function VoiceWave({ media, progress }: { media: MediaView | null; progress: number }) {
+  const [peaks, setPeaks] = useState<number[] | null>(null);
+  useEffect(() => {
+    if (!media) return;
+    let live = true;
+    mediaBlob(media).then((b) => audioPeaks(b, 48)).then((p) => { if (live) setPeaks(p); }, () => { if (live) setPeaks([]); });
+    return () => { live = false; };
+  }, [media]);
+  if (!peaks?.length) return <span className="h-14 w-full max-w-sm" aria-hidden />;
+  return <Waveform peaks={peaks} progress={progress} label="Voice note" className="pointer-events-none w-full max-w-sm" />;
 }
 
 function Viewers({ postId, onClose }: { postId: string; onClose: () => void }) {

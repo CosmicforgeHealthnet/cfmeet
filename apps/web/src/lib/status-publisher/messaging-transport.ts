@@ -50,10 +50,19 @@ function toCreateStatus(req: StatusCreateRequest): CreateStatus {
     ...(typeof req.allowSharing === "boolean" ? { allowSharing: req.allowSharing } : {}),
     ...(req.mentions?.length ? { mentions: req.mentions } : {}),
   };
+  // Optional fields go only when set (the server validates each against the kind).
+  const set = <T extends object>(o: T): Partial<T> => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== "")) as Partial<T>;
   switch (req.kind) {
-    case "TEXT": return { kind: "TEXT", text: req.text, background: req.background, font: req.font, ...order };
+    case "TEXT":
+      return {
+        kind: "TEXT", text: req.text,
+        ...set({ background: req.background, font: req.font, textColor: req.textColor, textAlign: req.textAlign, textSize: req.textSize, backgroundGradient: req.backgroundGradient, musicMediaId: req.musicMediaId, musicTitle: req.musicTitle }),
+        ...order,
+      };
     case "VIDEO": return { kind: "VIDEO", mediaId: req.mediaId, startMs: req.startMs, endMs: req.endMs, caption: req.caption, ...order };
-    default: return { kind: req.kind, mediaId: req.mediaId, caption: req.caption, ...order };
+    case "IMAGE": return { kind: "IMAGE", mediaId: req.mediaId, caption: req.caption, ...set({ musicMediaId: req.musicMediaId, musicTitle: req.musicTitle }), ...order };
+    case "AUDIO":
+      return { kind: "AUDIO", mediaId: req.mediaId, caption: req.caption, ...set({ background: req.background, backgroundGradient: req.backgroundGradient, musicTitle: req.musicTitle }), ...order };
   }
 }
 

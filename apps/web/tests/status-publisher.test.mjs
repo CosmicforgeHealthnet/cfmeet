@@ -456,3 +456,82 @@ test("a processor that can't encode here falls back to the source once, posted a
   assert.deepEqual(server.statuses.map((s) => [s.req.startMs, s.req.endMs, s.req.caption, s.req.sequence]), [[5000, 65000, "c", 0], [65000, 90000, undefined, 1]]);
   assert.equal(storage.blobs.size, 0);
 });
+
+test("music on text / photo statuses: the clip is uploaded as AUDIO and sent as musicMediaId; text looks and music statuses go as they are", async () => {
+  const server = fakeServer();
+  const { q } = makeQueue(server);
+  await q.start("me");
+  const gradient = { from: "#6366f1", to: "#ec4899", angle: 135 };
+  await q.enqueue({ items: [
+    { kind: "TEXT", text: "hi", background: "#6366f1", font: 1, textColor: "#ffffff", textAlign: "left", textSize: 3, backgroundGradient: gradient, music: { blob: blob(5, "audio/mp4"), durationMs: 30000, title: " Song " } },
+    { kind: "IMAGE", blob: blob(6), caption: "pic", music: { blob: blob(7, "audio/mp4"), durationMs: 15000, title: "Tune" } },
+    { kind: "AUDIO", blob: blob(5, "audio/mp4"), durationMs: 30000, musicTitle: "Mine", backgroundGradient: gradient, background: "#6366f1" },
+    { kind: "AUDIO", blob: blob(5, "audio/webm"), durationMs: 9000, background: "#128C7E" },
+  ] });
+  await q.settled();
+  const reqs = server.statuses.map((s) => s.req);
+  assert.deepEqual(reqs.map((r) => r.kind), ["TEXT", "IMAGE", "AUDIO", "AUDIO"]);
+  const [text, image, music, voice] = reqs;
+  assert.equal(text.background, undefined, "a gradient replaces the solid colour");
+  assert.deepEqual(text.backgroundGradient, gradient);
+  assert.deepEqual([text.textColor, text.textAlign, text.textSize, text.font, text.musicTitle], ["#ffffff", "left", 3, 1, "Song"]);
+  assert.ok(text.musicMediaId);
+  assert.equal(server.uploads.get(text.musicMediaId).req.kind, "AUDIO");
+  assert.equal(server.uploads.get(text.musicMediaId).req.durationMs, 30000);
+  assert.equal(server.uploads.get(image.mediaId).req.kind, "IMAGE");
+  assert.equal(server.uploads.get(image.musicMediaId).req.kind, "AUDIO");
+  assert.equal(image.musicTitle, "Tune");
+  assert.deepEqual([music.musicTitle, music.background], ["Mine", undefined]);
+  assert.deepEqual(music.backgroundGradient, gradient);
+  assert.deepEqual([voice.musicTitle, voice.background], [undefined, "#128C7E"]);
+  assert.equal(server.calls.start, 5);
+});
+
+test("a deferred video gets its named extra files (music) and they are erased once rendered; the view separates processing from upload", async () => {
+  const server = fakeServer();
+  const storage = new MemoryQueueStorage();
+  const { q } = makeQueue(server, storage);
+  await q.start("me");
+  let seen = null;
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  q.registerProcessor("edit", async (input, params, ctx) => {
+    seen = { params, music: ctx.blobs.music };
+    ctx.onProgress(0.5);
+    await gate;
+    return { segments: [{ blob: blob(9, "video/mp4"), durationMs: 60000 }, { blob: blob(5, "video/mp4"), durationMs: 20000 }] };
+  });
+  const music = blob(4, "audio/mp4");
+  await q.enqueue({ items: [{ kind: "VIDEO", process: { processor: "edit", input: blob(30, "video/mp4"), params: { overlays: [1], music: { startMs: 0 } }, blobs: { music } }, caption: "c" }] });
+  await new Promise((r) => setTimeout(r, 5));
+  const during = q.getSnapshot().jobs[0];
+  assert.equal(during.state, "processing");
+  assert.equal(during.processing, 0.5);
+  assert.equal(during.upload, null);
+  assert.ok([...storage.blobs.keys()].some((k) => k.endsWith("/input-music")));
+  release();
+  await q.settled();
+  assert.equal(await seen.music.text(), await music.text());
+  assert.deepEqual(seen.params, { overlays: [1], music: { startMs: 0 } });
+  assert.deepEqual(server.statuses.map((s) => [s.req.kind, s.req.endMs, s.req.caption, s.req.sequence]), [["VIDEO", 60000, "c", 0], ["VIDEO", 20000, undefined, 1]]);
+  assert.equal(new Set(server.statuses.map((s) => s.req.groupId)).size, 1);
+  assert.equal(storage.blobs.size, 0);
+});
+
+test("upload progress is reported in bytes, separately from processing", async () => {
+  const server = fakeServer();
+  const { q } = makeQueue(server);
+  await q.start("me");
+  const views = [];
+  q.subscribe?.(() => views.push(q.getSnapshot().jobs[0]));
+  let hold;
+  const held = new Promise((r) => { hold = r; });
+  server.hooks.complete = async () => { views.push(q.getSnapshot().jobs[0]); await held; };
+  await q.enqueue({ items: [{ kind: "IMAGE", blob: blob(10) }] });
+  await new Promise((r) => setTimeout(r, 20));
+  const mid = views.filter(Boolean).at(-1);
+  assert.equal(mid.processing, null);
+  assert.deepEqual(mid.upload, { sentBytes: 10, totalBytes: 10 });
+  hold();
+  await q.settled();
+});
