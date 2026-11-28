@@ -548,6 +548,18 @@ pub(crate) async fn leave_in<C: ConnectionTrait>(
         ],
     )
     .await?;
+    // Their invite links stop admitting people.
+    db::exec(
+        txn,
+        "UPDATE messaging_community_invite_links SET revoked_at = $3, revoked_by_principal_id = $4           WHERE community_id = $1 AND created_by_principal_id = $2 AND revoked_at IS NULL",
+        vec![
+            community.id.into(),
+            principal.into(),
+            now.into(),
+            actor.into(),
+        ],
+    )
+    .await?;
     let reason = if leaving {
         "LEFT_COMMUNITY"
     } else {
@@ -900,10 +912,13 @@ pub async fn ensure_announcements(
         .as_str()
         .and_then(|s| Uuid::parse_str(s).ok())
         .ok_or(Error::code(ErrorCode::InternalError))?;
-    let version = created.body["version"].as_i64().unwrap_or(1);
-    if !created.body["announcementOnly"].as_bool().unwrap_or(false) {
+    // The current state (a replayed creation answers the body stored when it was created).
+    let conv = load(&state.db, ctx, conversation, false)
+        .await?
+        .ok_or(Error::code(ErrorCode::InternalError))?;
+    if !conv.announcement_only {
         let patch: service::PatchRequest = serde_json::from_value(json!({
-            "expectedVersion": version,
+            "expectedVersion": conv.version,
             "announcementOnly": true,
         }))
         .map_err(|_| Error::code(ErrorCode::InternalError))?;
@@ -1057,6 +1072,15 @@ pub async fn update(
                     ],
                 )
                 .await?;
+                if privacy == Some("INVITE_ONLY") {
+                    // Only admins invite now: links of anyone else stop working.
+                    db::exec(
+                        txn,
+                        "UPDATE messaging_community_invite_links l SET revoked_at = $2, revoked_by_principal_id = $3                           WHERE l.community_id = $1 AND l.revoked_at IS NULL AND NOT EXISTS (                             SELECT 1 FROM messaging_community_members m WHERE m.community_id = l.community_id                                AND m.principal_id = l.created_by_principal_id AND m.state = 'ACTIVE'                                AND m.role IN ('OWNER', 'ADMIN'))",
+                        vec![id.into(), now.into(), me.into()],
+                    )
+                    .await?;
+                }
                 audit_action(txn, &ctx2, me, "COMMUNITY_UPDATED", id, json!({}), now).await?;
                 Ok(c.announcements_conversation_id)
             })
