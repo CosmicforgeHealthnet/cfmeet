@@ -1237,7 +1237,7 @@ async fn starred_access_never_reports_deleted_expired_hidden_or_left_messages() 
     assert!(hide.status.is_success(), "{}", hide.text);
     // Disappearing-message expiry, as the retention worker leaves it.
     h.sql(&format!(
-        "UPDATE messaging_messages SET lifecycle = 'PURGED', lifecycle_reason = 'RETENTION_EXPIRED' WHERE id = '{}'",
+        "UPDATE messaging_messages SET lifecycle = 'EXPIRED', lifecycle_reason = 'RETENTION_EXPIRED' WHERE id = '{}'",
         ids[3]
     ))
     .await
