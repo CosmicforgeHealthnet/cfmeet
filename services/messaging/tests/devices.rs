@@ -830,3 +830,34 @@ async fn no_private_key_or_secret_material_reaches_the_database() {
         .await;
     assert_eq!(suspicious, 0);
 }
+
+#[tokio::test]
+async fn first_party_directory_lookups_are_bounded_per_person_not_shared() {
+    let Some(h) = Harness::build(|s| {
+        s.devices.directory_lookups_per_minute = 3;
+    })
+    .await
+    else {
+        return;
+    };
+    // CF Meet's own apps: one relaying credential, many people acting through it.
+    let c = h.first_party(true);
+    let alice = h.principal(&c);
+    let bob = h.principal(&c);
+    let carol = h.principal(&c);
+    h.active_device(&c, alice).await;
+    let path = format!("/v1/messaging/principals/{alice}/devices");
+    for _ in 0..3 {
+        assert_eq!(h.get(&c, Some(bob), &path).await.status, StatusCode::OK);
+    }
+    assert_eq!(
+        h.get(&c, Some(bob), &path).await.code(),
+        "RATE_LIMITED",
+        "one person still has the anti-enumeration bound"
+    );
+    assert_eq!(
+        h.get(&c, Some(carol), &path).await.status,
+        StatusCode::OK,
+        "another person of the same app is not limited by Bob's lookups"
+    );
+}
